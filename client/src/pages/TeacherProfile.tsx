@@ -1,0 +1,509 @@
+import { useParams, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Star, Users, MessageSquare, TrendingUp, Award, Calendar, Edit, Clock, Mail, BookOpen, User, BarChart3, Activity, Target, Zap, ThumbsUp } from "lucide-react";
+import { SkillBadges } from "@/components/SkillBadges";
+import { RatingProgress } from "@/components/ProgressBar";
+import { FeedbackDetailModal } from "@/components/FeedbackDetailModal";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Teacher, Feedback } from "@shared/schema";
+import { apiRequest } from "@/lib/queryClient";
+import { useState } from "react";
+
+interface TeacherStats {
+  averageRating: number;
+  totalFeedback: number;
+  totalStudents: number;
+  ratingDistribution: { rating: number; count: number }[];
+  feedbackList: Feedback[];
+}
+
+export default function TeacherProfile() {
+  const { id } = useParams<{ id: string }>();
+  const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const { data: teacher, isLoading: teacherLoading } = useQuery<Teacher>({
+    queryKey: [`/api/teachers/${id}`],
+  });
+
+  const { data: feedbackList = [] } = useQuery<Feedback[]>({
+    queryKey: [`/api/feedback/teacher/${id}`],
+  });
+
+  const ratingDistribution = [
+    { rating: 5, count: feedbackList.filter(f => f.rating === 5).length },
+    { rating: 4, count: feedbackList.filter(f => f.rating === 4).length },
+    { rating: 3, count: feedbackList.filter(f => f.rating === 3).length },
+    { rating: 2, count: feedbackList.filter(f => f.rating === 2).length },
+    { rating: 1, count: feedbackList.filter(f => f.rating === 1).length },
+  ];
+
+  const uniqueStudents = new Set(feedbackList.map(f => f.studentId)).size;
+  const averageRating = feedbackList.length > 0 
+    ? feedbackList.reduce((sum, f) => sum + f.rating, 0) / feedbackList.length 
+    : 0;
+
+  // Calculate additional statistics
+  const positiveFeedbackCount = feedbackList.filter(f => f.rating >= 4).length;
+  const positiveFeedbackRate = feedbackList.length > 0 
+    ? (positiveFeedbackCount / feedbackList.length) * 100 
+    : 0;
+  
+  // Calculate rating trend (comparing recent vs older feedback)
+  const sortedFeedback = [...feedbackList].sort((a, b) => 
+    new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+  const recentFeedback = sortedFeedback.slice(0, Math.ceil(feedbackList.length / 2));
+  const olderFeedback = sortedFeedback.slice(Math.ceil(feedbackList.length / 2));
+  
+  const recentAvgRating = recentFeedback.length > 0
+    ? recentFeedback.reduce((sum, f) => sum + f.rating, 0) / recentFeedback.length
+    : 0;
+  const olderAvgRating = olderFeedback.length > 0
+    ? olderFeedback.reduce((sum, f) => sum + f.rating, 0) / olderFeedback.length
+    : 0;
+  const ratingTrend = recentAvgRating - olderAvgRating;
+
+  // Calculate response rate (replies are fetched separately, so we'll set to 0 for now)
+  const responseRate = 0;
+
+  // Calculate average comment length
+  const commentsWithText = feedbackList.filter(f => f.comment && f.comment.length > 0);
+  const avgCommentLength = commentsWithText.length > 0
+    ? commentsWithText.reduce((sum, f) => sum + (f.comment?.length || 0), 0) / commentsWithText.length
+    : 0;
+
+  if (teacherLoading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="space-y-6">
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!teacher) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-center text-muted-foreground">Teacher not found</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const handleFeedbackClick = (feedback: Feedback) => {
+    setSelectedFeedback(feedback);
+    setIsModalOpen(true);
+  };
+
+  return (
+    <div className="container mx-auto px-4 py-8 space-y-8 animate-fadeIn" style={{ animationDuration: '0.4s' }}>
+      {/* Header Section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2">
+          <Card className="h-full hover-lift transition-bounce">
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-4 flex-1">
+                  <Avatar className="h-20 w-20">
+                    {teacher.profileImage && (
+                      <AvatarImage src={teacher.profileImage} alt={teacher.name} />
+                    )}
+                    <AvatarFallback className="bg-primary/10 text-primary text-xl">
+                      {teacher.name.split(" ").map((n) => n[0]).join("")}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="space-y-2 flex-1">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-3xl">{teacher.name}</CardTitle>
+                        <CardDescription className="text-base">
+                          {teacher.subject} • {teacher.department}
+                        </CardDescription>
+                      </div>
+                      {(user?.role === "admin" || user?.role === "teacher") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/teacher/${id}/edit`)}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit Profile
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
+                      <span className="text-2xl font-bold">{averageRating.toFixed(1)}</span>
+                      <span className="text-sm text-muted-foreground">({feedbackList.length} reviews)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            {(teacher.bio || teacher.officeHours || teacher.contactInfo || teacher.teachingPhilosophy) && (
+              <CardContent className="space-y-4 pt-4">
+                {teacher.bio && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="text-sm font-semibold">About</h3>
+                    </div>
+                    <p className="text-sm text-foreground leading-relaxed">{teacher.bio}</p>
+                  </div>
+                )}
+                {teacher.officeHours && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="text-sm font-semibold">Office Hours</h3>
+                    </div>
+                    <p className="text-sm text-foreground">{teacher.officeHours}</p>
+                  </div>
+                )}
+                {teacher.contactInfo && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="text-sm font-semibold">Contact</h3>
+                    </div>
+                    <p className="text-sm text-foreground">{teacher.contactInfo}</p>
+                  </div>
+                )}
+                {teacher.teachingPhilosophy && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="text-sm font-semibold">Teaching Philosophy</h3>
+                    </div>
+                    <p className="text-sm text-foreground leading-relaxed">{teacher.teachingPhilosophy}</p>
+                  </div>
+                )}
+              </CardContent>
+            )}
+          </Card>
+        </div>
+
+        {/* Enhanced Stats Cards */}
+        <div className="space-y-4">
+          <Card className="hover-lift animate-slideInDown">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Students
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold animate-fadeScale">{uniqueStudents}</p>
+              <p className="text-xs text-muted-foreground">unique reviewers</p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover-lift animate-slideInDown" style={{ animationDelay: "0.1s" }}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Feedback
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold animate-fadeScale">{feedbackList.length}</p>
+              <p className="text-xs text-muted-foreground">total submissions</p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover-lift animate-slideInDown" style={{ animationDelay: "0.2s" }}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <ThumbsUp className="h-4 w-4" />
+                Positive Rate
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold animate-fadeScale">{positiveFeedbackRate.toFixed(0)}%</p>
+              <p className="text-xs text-muted-foreground">{positiveFeedbackCount} of {feedbackList.length} positive</p>
+            </CardContent>
+          </Card>
+
+          {feedbackList.length > 0 && (
+            <Card className="hover-lift animate-slideInDown" style={{ animationDelay: "0.3s" }}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Activity className={`h-4 w-4 ${ratingTrend >= 0 ? 'text-green-500' : 'text-red-500'}`} />
+                  Rating Trend
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-baseline gap-2">
+                  <p className={`text-2xl font-bold ${ratingTrend >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {ratingTrend >= 0 ? '+' : ''}{ratingTrend.toFixed(2)}
+                  </p>
+                  <TrendingUp className={`h-4 w-4 ${ratingTrend >= 0 ? 'text-green-500 rotate-0' : 'text-red-500 rotate-180'}`} />
+                </div>
+                <p className="text-xs text-muted-foreground">vs. previous period</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Achievement Badges */}
+      <Card className="hover-lift animate-slideInUp">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Award className="h-5 w-5" />
+            Achievements & Badges
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SkillBadges 
+            averageRating={averageRating}
+            totalFeedback={feedbackList.length}
+            totalStudents={uniqueStudents}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Rating Progress */}
+      <Card className="hover-lift animate-slideInUp" style={{ animationDelay: "0.1s" }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Rating Progress
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RatingProgress 
+            currentRating={averageRating}
+            totalReviews={feedbackList.length}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Enhanced Rating Distribution */}
+      <Card className="hover-lift animate-slideInUp" style={{ animationDelay: "0.2s" }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5" />
+            Rating Distribution
+          </CardTitle>
+          <CardDescription>Breakdown of all ratings received</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {ratingDistribution.map(({ rating, count }, index) => {
+              const percentage = feedbackList.length > 0 ? (count / feedbackList.length) * 100 : 0;
+              return (
+                <div 
+                  key={rating} 
+                  className="flex items-center gap-4 animate-slideInUp hover-scale transition-bounce" 
+                  style={{ animationDelay: `${index * 0.05}s` }}
+                >
+                  <div className="flex items-center gap-1 w-24">
+                    {[...Array(rating)].map((_, i) => (
+                      <Star 
+                        key={i} 
+                        className="h-4 w-4 fill-yellow-400 text-yellow-400 animate-scaleIn" 
+                        style={{ animationDelay: `${index * 0.05 + i * 0.02}s` }}
+                      />
+                    ))}
+                    {[...Array(5 - rating)].map((_, i) => (
+                      <Star key={`empty-${i}`} className="h-4 w-4 text-gray-300" />
+                    ))}
+                  </div>
+                  <div className="flex-1 bg-muted rounded-full h-3 overflow-hidden relative">
+                    <div
+                      className="bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 h-full progress-animate transition-all duration-700 ease-out"
+                      style={{
+                        width: `${percentage}%`,
+                      }}
+                    />
+                    {percentage > 0 && (
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer" />
+                    )}
+                  </div>
+                  <div className="w-16 text-right">
+                    <span className="font-semibold text-lg">{count}</span>
+                    <p className="text-xs text-muted-foreground">
+                      {percentage.toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Summary Stats */}
+          {feedbackList.length > 0 && (
+            <div className="mt-6 pt-6 border-t grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center p-3 bg-muted/50 rounded-lg animate-fadeScale">
+                <p className="text-2xl font-bold text-green-600">{ratingDistribution[4]?.count || 0}</p>
+                <p className="text-xs text-muted-foreground">5 Stars</p>
+              </div>
+              <div className="text-center p-3 bg-muted/50 rounded-lg animate-fadeScale" style={{ animationDelay: "0.1s" }}>
+                <p className="text-2xl font-bold text-blue-600">{ratingDistribution[3]?.count || 0}</p>
+                <p className="text-xs text-muted-foreground">4 Stars</p>
+              </div>
+              <div className="text-center p-3 bg-muted/50 rounded-lg animate-fadeScale" style={{ animationDelay: "0.2s" }}>
+                <p className="text-2xl font-bold text-yellow-600">{ratingDistribution[2]?.count || 0}</p>
+                <p className="text-xs text-muted-foreground">3 Stars</p>
+              </div>
+              <div className="text-center p-3 bg-muted/50 rounded-lg animate-fadeScale" style={{ animationDelay: "0.3s" }}>
+                <p className="text-2xl font-bold text-orange-600">{(ratingDistribution[1]?.count || 0) + (ratingDistribution[0]?.count || 0)}</p>
+                <p className="text-xs text-muted-foreground">1-2 Stars</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Performance Metrics */}
+      {feedbackList.length > 0 && (
+        <Card className="hover-lift animate-slideInUp" style={{ animationDelay: "0.25s" }}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5" />
+              Performance Metrics
+            </CardTitle>
+            <CardDescription>Detailed performance insights</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 rounded-lg border border-blue-200 dark:border-blue-800 animate-fadeScale">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Response Rate</span>
+                  <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                </div>
+                <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">{responseRate.toFixed(0)}%</p>
+                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                  {Math.round((responseRate / 100) * feedbackList.length)} of {feedbackList.length} responded
+                </p>
+              </div>
+              
+              <div className="p-4 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 rounded-lg border border-green-200 dark:border-green-800 animate-fadeScale" style={{ animationDelay: "0.1s" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-green-700 dark:text-green-300">Avg Comment Length</span>
+                  <Zap className="h-4 w-4 text-green-600 dark:text-green-400" />
+                </div>
+                <p className="text-2xl font-bold text-green-900 dark:text-green-100">{Math.round(avgCommentLength)}</p>
+                <p className="text-xs text-green-600 dark:text-green-400 mt-1">characters per comment</p>
+              </div>
+              
+              <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950 dark:to-purple-900 rounded-lg border border-purple-200 dark:border-purple-800 animate-fadeScale" style={{ animationDelay: "0.2s" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Engagement Score</span>
+                  <Activity className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                </div>
+                <p className="text-2xl font-bold text-purple-900 dark:text-purple-100">
+                  {Math.round((averageRating * 20) + (positiveFeedbackRate * 0.3) + (responseRate * 0.2))}
+                </p>
+                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">out of 100</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Recent Feedback */}
+      <Card className="hover-lift animate-slideInUp" style={{ animationDelay: "0.3s" }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" />
+            Recent Feedback
+          </CardTitle>
+          <CardDescription>Click on a feedback to view full details</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {feedbackList.length === 0 ? (
+              <div className="text-center py-8 animate-fadeIn">
+                <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-2 opacity-50" />
+                <p className="text-muted-foreground">No feedback yet</p>
+              </div>
+            ) : (
+              feedbackList.slice(0, 5).map((feedback, index) => (
+                <div
+                  key={feedback.id}
+                  className="border rounded-lg p-4 hover-lift cursor-pointer animate-slideInUp group"
+                  style={{ animationDelay: `${index * 0.05}s` }}
+                  onClick={() => handleFeedbackClick(feedback)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-medium group-hover:text-primary transition-colors">{feedback.studentName}</p>
+                      </div>
+                      <p className="text-sm text-muted-foreground flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {feedback.createdAt ? new Date(feedback.createdAt).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        }) : 'N/A'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {[...Array(feedback.rating)].map((_, i) => (
+                        <Star 
+                          key={i} 
+                          className="h-4 w-4 fill-yellow-400 text-yellow-400 animate-scaleIn" 
+                          style={{ animationDelay: `${i * 0.05}s` }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  {feedback.comment && (
+                    <p className="mt-2 text-sm text-foreground line-clamp-2 group-hover:text-foreground/90 transition-colors">
+                      {feedback.comment}
+                    </p>
+                  )}
+                  {feedback.subject && (
+                    <Badge variant="outline" className="mt-2 hover-scale">{feedback.subject}</Badge>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          {feedbackList.length > 5 && (
+            <Button variant="outline" className="w-full mt-4 hover-lift">
+              View All {feedbackList.length} Reviews
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Analytics Link */}
+      <Card className="hover-lift">
+        <CardContent className="pt-6">
+          <Button
+            variant="outline"
+            className="w-full hover-lift"
+            onClick={() => navigate(`/analytics/${id}`)}
+          >
+            <TrendingUp className="h-4 w-4 mr-2 animate-float" />
+            View Advanced Analytics
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Feedback Detail Modal */}
+      <FeedbackDetailModal
+        feedback={selectedFeedback}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+      />
+    </div>
+  );
+}
