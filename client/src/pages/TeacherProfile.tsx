@@ -9,6 +9,7 @@ import { Star, Users, MessageSquare, TrendingUp, Award, Calendar, Edit, Clock, M
 import { SkillBadges } from "@/components/SkillBadges";
 import { RatingProgress } from "@/components/ProgressBar";
 import { FeedbackDetailModal } from "@/components/FeedbackDetailModal";
+import { TeacherAISummary } from "@/components/TeacherAISummary";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Teacher, Feedback } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
@@ -414,6 +415,13 @@ export default function TeacherProfile() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* AI-Generated Summary */}
+      {feedbackList.length > 0 && (
+        <div className="animate-slideInUp" style={{ animationDelay: "0.28s" }}>
+          <TeacherAISummary teacherId={id!} />
+        </div>
       )}
 
       {/* Recent Feedback */}

@@ -23,9 +23,10 @@ interface Reply {
 interface FeedbackThreadProps {
   feedbackId: string;
   showReplyForm?: boolean;
+  feedbackComment?: string | null;
 }
 
-export function FeedbackThread({ feedbackId, showReplyForm = true }: FeedbackThreadProps) {
+export function FeedbackThread({ feedbackId, showReplyForm = true, feedbackComment }: FeedbackThreadProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -120,7 +121,7 @@ export function FeedbackThread({ feedbackId, showReplyForm = true }: FeedbackThr
             <Reply className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">Add a reply</span>
           </div>
-          <ReplyForm feedbackId={feedbackId} />
+          <ReplyForm feedbackId={feedbackId} feedbackComment={feedbackComment} />
         </div>
       )}
     </div>

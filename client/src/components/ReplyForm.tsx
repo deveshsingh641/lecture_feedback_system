@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Send } from "lucide-react";
@@ -11,13 +11,45 @@ import { Send } from "lucide-react";
 interface ReplyFormProps {
   feedbackId: string;
   onSuccess?: () => void;
+  feedbackComment?: string | null;
 }
 
-export function ReplyForm({ feedbackId, onSuccess }: ReplyFormProps) {
+export function ReplyForm({ feedbackId, onSuccess, feedbackComment }: ReplyFormProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
+
+  const { data: templatesData, isLoading: templatesLoading } = useQuery<{
+    templates: string[];
+  }>({
+    queryKey: ["/api/ai/reply-templates", feedbackId],
+    enabled: !!feedbackComment && !!user,
+    queryFn: async () => {
+      const res = await fetch("/api/ai/reply-templates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({ comment: feedbackComment }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({} as any));
+        throw new Error(error.error || "Failed to load reply templates");
+      }
+
+      return res.json();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "AI suggestions unavailable",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   const replyMutation = useMutation({
     mutationFn: async (data: { content: string }) => {
@@ -70,6 +102,25 @@ export function ReplyForm({ feedbackId, onSuccess }: ReplyFormProps) {
           disabled={replyMutation.isPending}
         />
       </div>
+
+      {feedbackComment && templatesData?.templates?.length ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">AI Suggestions:</p>
+          <div className="flex flex-wrap gap-2">
+            {templatesData.templates.map((t, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="text-xs px-3 py-2 rounded-md border bg-muted hover:bg-muted/80 text-left max-w-xs line-clamp-3"
+                onClick={() => setContent(t)}
+                disabled={replyMutation.isPending}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="flex justify-end">
         <Button
           type="submit"

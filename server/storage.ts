@@ -3,7 +3,8 @@ import {
   type Teacher, type InsertTeacher, type UpdateTeacher,
   type Feedback, type InsertFeedback,
   type Reply, type InsertReply,
-  users, teachers, feedback, replies 
+  type FeedbackAnalysis, type TeacherSummary, type ChatHistory,
+  users, teachers, feedback, replies, feedbackAnalysis, teacherSummaries, chatHistory
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
@@ -44,6 +45,28 @@ export interface IStorage {
   getMostFeedbackTeachers(limit?: number): Promise<Array<Teacher & { rank: number }>>;
   getMostImprovedTeachers(limit?: number): Promise<Array<Teacher & { rank: number; improvement: number }>>;
   getRecentActivity(limit?: number): Promise<Array<Feedback & { teacherName: string }>>;
+  
+  saveFeedbackAnalysis(data: {
+    feedbackId: string;
+    sentiment: string;
+    sentimentScore: number;
+    qualityScore: number;
+    keywords: string;
+  }): Promise<void>;
+  getFeedbackAnalysis(feedbackId: string): Promise<FeedbackAnalysis | undefined>;
+  saveTeacherSummary(data: {
+    teacherId: string;
+    summary: string;
+    strengths: string;
+    improvements: string;
+  }): Promise<void>;
+  getLatestTeacherSummary(teacherId: string): Promise<TeacherSummary | undefined>;
+  saveChatMessage(data: {
+    userId?: string;
+    message: string;
+    response: string;
+  }): Promise<void>;
+  getChatHistory(userId: string, limit?: number): Promise<ChatHistory[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -301,6 +324,76 @@ export class DatabaseStorage implements IStorage {
     );
 
     return feedbackWithTeachers;
+  }
+
+  async saveFeedbackAnalysis(data: {
+    feedbackId: string;
+    sentiment: string;
+    sentimentScore: number;
+    qualityScore: number;
+    keywords: string;
+  }): Promise<void> {
+    await db
+      .insert(feedbackAnalysis)
+      .values(data)
+      .onConflictDoUpdate({
+        target: feedbackAnalysis.feedbackId,
+        set: {
+          sentiment: data.sentiment,
+          sentimentScore: data.sentimentScore,
+          qualityScore: data.qualityScore,
+          keywords: data.keywords,
+          analyzedAt: new Date(),
+        },
+      });
+  }
+
+  async getFeedbackAnalysis(feedbackId: string): Promise<FeedbackAnalysis | undefined> {
+    const [analysis] = await db
+      .select()
+      .from(feedbackAnalysis)
+      .where(eq(feedbackAnalysis.feedbackId, feedbackId));
+    return analysis;
+  }
+
+  async saveTeacherSummary(data: {
+    teacherId: string;
+    summary: string;
+    strengths: string;
+    improvements: string;
+  }): Promise<void> {
+    await db.insert(teacherSummaries).values(data);
+  }
+
+  async getLatestTeacherSummary(teacherId: string): Promise<TeacherSummary | undefined> {
+    const [summary] = await db
+      .select()
+      .from(teacherSummaries)
+      .where(eq(teacherSummaries.teacherId, teacherId))
+      .orderBy(desc(teacherSummaries.generatedAt))
+      .limit(1);
+    return summary;
+  }
+
+  async saveChatMessage(data: {
+    userId?: string;
+    message: string;
+    response: string;
+  }): Promise<void> {
+    await db.insert(chatHistory).values({
+      userId: data.userId || null,
+      message: data.message,
+      response: data.response,
+    });
+  }
+
+  async getChatHistory(userId: string, limit: number = 10): Promise<ChatHistory[]> {
+    return db
+      .select()
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, userId))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(limit);
   }
 }
 

@@ -208,7 +208,7 @@ export function FeedbackDetailModal({
               <MessageSquare className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Discussion Thread</h3>
             </div>
-            <FeedbackThread feedbackId={feedback.id} />
+            <FeedbackThread feedbackId={feedback.id} feedbackComment={feedback.comment} />
           </div>
 
           {/* Enhanced Action Buttons */}

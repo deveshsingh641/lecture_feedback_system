@@ -1,16 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import { TeacherCard } from "@/components/TeacherCard";
 import { FeedbackForm } from "@/components/FeedbackForm";
-import { StatCard } from "@/components/StatCard";
-import { Leaderboard } from "@/components/Leaderboard";
-import { ActivityFeed } from "@/components/ActivityFeed";
 import { Confetti } from "@/components/Confetti";
 import { FeedbackStats } from "@/components/FeedbackStats";
 import { ExportButton } from "@/components/ExportButton";
 import { AdvancedSearch, type SearchFilters } from "@/components/AdvancedSearch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { Users, MessageSquare, Star } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Teacher } from "@shared/schema";
@@ -21,6 +17,7 @@ export default function StudentDashboard() {
   const { toast } = useToast();
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
   const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const [hideReminder, setHideReminder] = useState(false);
   const [searchFilters, setSearchFilters] = useState<SearchFilters | null>(null);
 
   const { data: teachers = [], isLoading: teachersLoading, error: teachersError } = useQuery<Teacher[]>({
@@ -29,6 +26,15 @@ export default function StudentDashboard() {
 
   const { data: submittedTeacherIds = [], error: submissionsError } = useQuery<string[]>({
     queryKey: ["/api/feedback/my-submissions"],
+  });
+
+  const { data: reminderStatus } = useQuery<{
+    needsReminder: boolean;
+    lastFeedbackDate: string | null;
+    daysSinceLastFeedback: number | null;
+  }>({
+    queryKey: ["/api/feedback/reminder-status"],
+    enabled: !!user && user.role === "student",
   });
 
   useEffect(() => {
@@ -157,7 +163,7 @@ export default function StudentDashboard() {
               <Skeleton key={i} className="h-32" />
             ))}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div id="teachers-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <Skeleton key={i} className="h-64" />
             ))}
@@ -199,6 +205,36 @@ export default function StudentDashboard() {
           </p>
         </div>
 
+        {reminderStatus && reminderStatus.needsReminder && !hideReminder && (
+          <div className="mb-6 p-4 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="font-semibold">Have you shared feedback recently?</p>
+              <p className="text-sm mt-1">
+                {reminderStatus.daysSinceLastFeedback === null
+                  ? "You haven't submitted any feedback yet. Your opinions help improve teaching quality."
+                  : `It's been ${reminderStatus.daysSinceLastFeedback} day${
+                      (reminderStatus.daysSinceLastFeedback || 0) === 1 ? "" : "s"
+                    } since your last feedback. Take a moment to share your thoughts.`}
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                className="px-3 py-2 text-sm rounded-md border border-amber-300 bg-white hover:bg-amber-100"
+                onClick={() => setHideReminder(true)}
+              >
+                Dismiss
+              </button>
+              <a
+                href="#teachers-list"
+                className="px-3 py-2 text-sm rounded-md bg-amber-500 text-white hover:bg-amber-600"
+              >
+                Give Feedback
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* Feedback Statistics */}
         <FeedbackStats className="mb-8" />
 
@@ -213,20 +249,6 @@ export default function StudentDashboard() {
             </div>
             <div className="flex-shrink-0 w-full sm:w-auto">
               <ExportButton data={filteredTeachers} type="teachers" filename="teachers-list" />
-            </div>
-          </div>
-        </div>
-
-        {/* Activity Feed and Leaderboards */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <div className="lg:col-span-1">
-            <ActivityFeed limit={8} />
-          </div>
-          <div className="lg:col-span-2">
-            <h2 className="text-2xl font-bold mb-4">Top Performers</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Leaderboard type="top-rated" limit={5} />
-              <Leaderboard type="most-feedback" limit={5} />
             </div>
           </div>
         </div>

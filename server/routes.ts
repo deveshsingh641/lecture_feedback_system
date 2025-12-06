@@ -1,10 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { loginSchema, signupSchema, insertTeacherSchema, insertFeedbackSchema, updateTeacherSchema, insertReplySchema } from "@shared/schema";
+import { loginSchema, signupSchema, insertTeacherSchema, insertFeedbackSchema, updateTeacherSchema, insertReplySchema, feedback } from "@shared/schema";
+import { aiService } from "./ai-service";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "edufeedback-secret-key";
 
@@ -244,6 +247,38 @@ export async function registerRoutes(
     }
   });
 
+  // Feedback reminder status for current student
+  app.get("/api/feedback/reminder-status", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const feedbackList = await storage.getFeedbackByStudent(req.user!.id);
+
+      if (feedbackList.length === 0) {
+        return res.json({
+          needsReminder: true,
+          lastFeedbackDate: null,
+          daysSinceLastFeedback: null,
+        });
+      }
+
+      const last = feedbackList[0];
+      const lastDate = new Date(last.createdAt!);
+      const now = new Date();
+      const diffMs = now.getTime() - lastDate.getTime();
+      const daysSince = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+      const THRESHOLD_DAYS = 7;
+
+      res.json({
+        needsReminder: daysSince >= THRESHOLD_DAYS,
+        lastFeedbackDate: lastDate.toISOString(),
+        daysSinceLastFeedback: daysSince,
+      });
+    } catch (error) {
+      console.error("Get feedback reminder status error:", error);
+      res.status(500).json({ error: "Failed to get feedback reminder status" });
+    }
+  });
+
   app.post("/api/feedback", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
     try {
       // Normalize empty comment strings to undefined
@@ -450,6 +485,195 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Get monthly performance error:", error);
       res.status(500).json({ error: "Failed to get monthly performance" });
+    }
+  });
+
+  // AI Routes
+  
+  // AI: Analyze feedback sentiment and quality
+  app.post("/api/ai/analyze-feedback/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const feedbackId = req.params.id;
+      const feedbackData = await db
+        .select()
+        .from(feedback)
+        .where(eq(feedback.id, feedbackId))
+        .limit(1);
+
+      if (!feedbackData[0]) {
+        return res.status(404).json({ error: "Feedback not found" });
+      }
+
+      const fb = feedbackData[0];
+      
+      // Analyze sentiment
+      const sentiment = await aiService.analyzeSentiment(fb.comment || "");
+      
+      // Score quality
+      const quality = await aiService.scoreFeedbackQuality(fb.comment || "", fb.rating);
+
+      // Save analysis
+      await storage.saveFeedbackAnalysis({
+        feedbackId: fb.id,
+        sentiment: sentiment.sentiment,
+        sentimentScore: sentiment.score,
+        qualityScore: quality.score,
+        keywords: JSON.stringify(sentiment.keywords),
+      });
+
+      res.json({
+        sentiment: sentiment.sentiment,
+        sentimentScore: sentiment.score,
+        keywords: sentiment.keywords,
+        qualityScore: quality.score,
+        qualityReasoning: quality.reasoning,
+      });
+    } catch (error: any) {
+      console.error("Analyze feedback error:", error);
+      res.status(500).json({ error: error.message || "Failed to analyze feedback" });
+    }
+  });
+
+  // AI: Generate teacher summary
+  app.post("/api/ai/teacher-summary/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const teacherId = req.params.id;
+      const feedbackList = await storage.getFeedbackByTeacher(teacherId);
+
+      const summary = await aiService.generateFeedbackSummary(feedbackList);
+
+      // Save summary
+      await storage.saveTeacherSummary({
+        teacherId,
+        summary: summary.summary,
+        strengths: JSON.stringify(summary.strengths),
+        improvements: JSON.stringify(summary.improvements),
+      });
+
+      res.json(summary);
+    } catch (error: any) {
+      console.error("Generate summary error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate summary" });
+    }
+  });
+
+  // AI: Get teacher summary
+  app.get("/api/ai/teacher-summary/:id", async (req, res) => {
+    try {
+      const teacherId = req.params.id;
+      const summary = await storage.getLatestTeacherSummary(teacherId);
+
+      if (!summary) {
+        return res.status(404).json({ error: "No summary available" });
+      }
+
+      res.json({
+        summary: summary.summary,
+        strengths: JSON.parse(summary.strengths || "[]"),
+        improvements: JSON.parse(summary.improvements || "[]"),
+        generatedAt: summary.generatedAt,
+      });
+    } catch (error: any) {
+      console.error("Get summary error:", error);
+      res.status(500).json({ error: error.message || "Failed to get summary" });
+    }
+  });
+
+  // AI: Teacher recommendations
+  app.post("/api/ai/recommend-teachers", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { preferences } = req.body;
+      
+      if (!preferences || typeof preferences !== "string") {
+        return res.status(400).json({ error: "Preferences string required" });
+      }
+
+      const teachers = await storage.getTeachers();
+      const recommendations = await aiService.recommendTeachers(preferences, teachers);
+
+      res.json({ recommendations });
+    } catch (error: any) {
+      console.error("Recommend teachers error:", error);
+      res.status(500).json({ error: error.message || "Failed to get recommendations" });
+    }
+  });
+
+  // AI: Chatbot
+  app.post("/api/ai/chat", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { message } = req.body;
+      
+      if (!message || typeof message !== "string") {
+        return res.status(400).json({ error: "Message required" });
+      }
+
+      const userId = req.user!.id;
+
+      // Get recent chat history
+      const history = await storage.getChatHistory(userId, 5);
+      const conversationHistory = history.reverse().flatMap((h) => [
+        { role: "user", content: h.message },
+        { role: "assistant", content: h.response },
+      ]);
+
+      const response = await aiService.chatbot(message, conversationHistory);
+
+      // Save to history
+      await storage.saveChatMessage({
+        userId,
+        message,
+        response,
+      });
+
+      res.json({ response });
+    } catch (error: any) {
+      console.error("Chatbot error:", error);
+      res.status(500).json({ error: error.message || "Failed to process chat message" });
+    }
+  });
+
+  // AI: Reply templates for teachers
+  app.post("/api/ai/reply-templates", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { comment } = req.body as { comment?: string };
+
+      if (!comment || typeof comment !== "string" || !comment.trim()) {
+        return res.status(400).json({ error: "Comment is required" });
+      }
+
+      // Optional: restrict to teacher/admin roles
+      if (req.user && !["teacher", "admin"].includes(req.user.role)) {
+        return res.status(403).json({ error: "Only teachers and admins can use reply templates" });
+      }
+
+      const templates = await aiService.generateReplyTemplates(comment);
+      res.json({ templates });
+    } catch (error: any) {
+      console.error("Reply templates error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate reply templates" });
+    }
+  });
+
+  // AI: Get feedback analysis
+  app.get("/api/ai/feedback-analysis/:id", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const feedbackId = req.params.id;
+      const analysis = await storage.getFeedbackAnalysis(feedbackId);
+
+      if (!analysis) {
+        return res.status(404).json({ error: "No analysis available" });
+      }
+
+      res.json({
+        sentiment: analysis.sentiment,
+        sentimentScore: analysis.sentimentScore,
+        qualityScore: analysis.qualityScore,
+        keywords: JSON.parse(analysis.keywords || "[]"),
+        analyzedAt: analysis.analyzedAt,
+      });
+    } catch (error: any) {
+      console.error("Get feedback analysis error:", error);
+      res.status(500).json({ error: error.message || "Failed to get analysis" });
     }
   });
 

@@ -52,6 +52,42 @@ export const replies = pgTable("replies", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const feedbackAnalysis = pgTable("feedback_analysis", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  feedbackId: varchar("feedback_id").notNull().references(() => feedback.id, { onDelete: "cascade" }).unique(),
+  sentiment: text("sentiment"), // "positive", "negative", "neutral"
+  sentimentScore: real("sentiment_score"), // -1 to 1
+  qualityScore: integer("quality_score"), // 1-10
+  keywords: text("keywords"), // JSON array of extracted keywords
+  analyzedAt: timestamp("analyzed_at").defaultNow(),
+});
+
+export const teacherSummaries = pgTable("teacher_summaries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  teacherId: varchar("teacher_id").notNull().references(() => teachers.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull(),
+  strengths: text("strengths"), // JSON array
+  improvements: text("improvements"), // JSON array
+  generatedAt: timestamp("generated_at").defaultNow(),
+});
+
+export const chatHistory = pgTable("chat_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
+  message: text("message").notNull(),
+  response: text("response").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const favorites = pgTable("favorites", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  studentId: varchar("student_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  teacherId: varchar("teacher_id").notNull().references(() => teachers.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  uniqueFavorite: unique().on(table.studentId, table.teacherId),
+}));
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
@@ -107,3 +143,7 @@ export type InsertFeedback = z.infer<typeof insertFeedbackSchema>;
 export type Feedback = typeof feedback.$inferSelect;
 export type InsertReply = z.infer<typeof insertReplySchema>;
 export type Reply = typeof replies.$inferSelect;
+export type FeedbackAnalysis = typeof feedbackAnalysis.$inferSelect;
+export type TeacherSummary = typeof teacherSummaries.$inferSelect;
+export type ChatHistory = typeof chatHistory.$inferSelect;
+export type Favorite = typeof favorites.$inferSelect;
