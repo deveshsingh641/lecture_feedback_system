@@ -7,8 +7,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageSquare, Star, TrendingUp, Users } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Feedback } from "@shared/schema";
 
@@ -16,14 +16,42 @@ interface FeedbackWithTeacher extends Feedback {
   teacherName?: string;
 }
 
+interface DoubtItem {
+  id: string;
+  teacherId: string;
+  teacherName?: string;
+  studentId: string;
+  studentName: string;
+  question: string;
+  answer?: string | null;
+  status: string;
+  createdAt?: string;
+  answeredAt?: string | null;
+}
+
 export default function TeacherDashboard() {
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [filterRating, setFilterRating] = useState<number | null>(null);
+  const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
 
   const { data: feedback = [], isLoading, error } = useQuery<FeedbackWithTeacher[]>({
     queryKey: ["/api/feedback/received"],
+  });
+
+  const { data: doubts = [] } = useQuery<DoubtItem[]>({
+    queryKey: ["/api/doubts/teacher"],
+  });
+
+  const answerMutation = useMutation({
+    mutationFn: async ({ id, answer }: { id: string; answer: string }) => {
+      const res = await apiRequest("POST", `/api/doubts/${id}/answer`, { answer });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/doubts/teacher"] });
+    },
   });
 
   const totalFeedback = feedback.length;
@@ -84,6 +112,16 @@ export default function TeacherDashboard() {
 
     return result;
   }, [feedback, searchQuery, sortBy, filterRating]);
+
+  const sortedDoubts = useMemo(() => {
+    const copy = [...doubts];
+    copy.sort((a, b) => {
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return db - da;
+    });
+    return copy;
+  }, [doubts]);
 
   if (isLoading) {
     return (
@@ -169,6 +207,7 @@ export default function TeacherDashboard() {
         <Tabs defaultValue="feedback" className="space-y-6">
           <TabsList>
             <TabsTrigger value="feedback" data-testid="tab-feedback">Feedback</TabsTrigger>
+            <TabsTrigger value="doubts" data-testid="tab-doubts">Doubt Wall</TabsTrigger>
             <TabsTrigger value="analytics" data-testid="tab-analytics">Analytics</TabsTrigger>
           </TabsList>
 
@@ -205,6 +244,65 @@ export default function TeacherDashboard() {
                   {feedback.length === 0 
                     ? "No feedback received yet. Feedback from students will appear here." 
                     : "No feedback found matching your criteria."}
+                </p>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="doubts" className="space-y-6">
+            <div className="space-y-4">
+              {sortedDoubts.map((doubt) => (
+                <Card key={doubt.id} className="border-l-4 border-l-sky-500">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <span>{doubt.studentName}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {doubt.status === "answered" ? "Answered" : "Open"}
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <p className="text-sm font-medium">Question</p>
+                      <p className="text-sm text-foreground whitespace-pre-wrap mt-1">{doubt.question}</p>
+                    </div>
+                    {doubt.answer && (
+                      <div className="rounded-md bg-muted p-3">
+                        <p className="text-xs font-medium text-muted-foreground mb-1">Your Answer</p>
+                        <p className="text-sm whitespace-pre-wrap">{doubt.answer}</p>
+                      </div>
+                    )}
+                    {!doubt.answer && (
+                      <div className="space-y-2">
+                        <textarea
+                          className="w-full min-h-[60px] text-sm rounded-md border border-input bg-background px-3 py-2"
+                          placeholder="Type your answer..."
+                          value={answerDrafts[doubt.id] || ""}
+                          onChange={(e) =>
+                            setAnswerDrafts((prev) => ({ ...prev, [doubt.id]: e.target.value }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                          onClick={() =>
+                            answerMutation.mutate({ id: doubt.id, answer: (answerDrafts[doubt.id] || "").trim() })
+                          }
+                          disabled={answerMutation.isPending || !(answerDrafts[doubt.id] || "").trim()}
+                        >
+                          {answerMutation.isPending ? "Sending..." : "Send Answer"}
+                        </button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {sortedDoubts.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">
+                  No doubts have been posted yet. When students submit doubts with their feedback, they will appear here.
                 </p>
               </div>
             )}

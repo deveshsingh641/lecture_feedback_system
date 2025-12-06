@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { StarRating } from "./StarRating";
 import { FeedbackTemplates } from "./FeedbackTemplates";
 import { Confetti } from "./Confetti";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Mic, MicOff } from "lucide-react";
 
 export interface TeacherData {
   id: string;
@@ -28,7 +28,7 @@ interface FeedbackFormProps {
   teacher: TeacherData | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (teacherId: string, rating: number, comment: string) => void;
+  onSubmit: (teacherId: string, rating: number, comment: string, anonymous: boolean, doubt?: string) => void;
   isSubmitting?: boolean;
 }
 
@@ -36,27 +36,146 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
   const [showConfetti, setShowConfetti] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionEnabled, setTranscriptionEnabled] = useState(false);
+  const [isAnonymous, setIsAnonymous] = useState(false);
+  const [doubt, setDoubt] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
 
   useEffect(() => {
     if (!open) {
       setRating(0);
       setComment("");
       setShowConfetti(false);
+      setIsRecording(false);
+      setIsTranscribing(false);
+      setIsAnonymous(false);
+      setDoubt("");
     }
   }, [open]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkTranscription() {
+      try {
+        const res = await fetch("/api/feedback/transcribe-enabled");
+        if (!res.ok) return;
+        const data = (await res.json()) as { enabled?: boolean };
+        if (!cancelled) {
+          setTranscriptionEnabled(!!data.enabled);
+        }
+      } catch {
+        if (!cancelled) {
+          setTranscriptionEnabled(false);
+        }
+      }
+    }
+
+    checkTranscription();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleTemplateSelect = (template: string) => {
     setComment(template);
   };
 
+  const sendForTranscription = useCallback(async (blob: Blob) => {
+    try {
+      setIsTranscribing(true);
+      const formData = new FormData();
+      formData.append("audio", blob, "feedback.webm");
+
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/feedback/transcribe", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+
+      if (!res.ok) {
+        let message = "Transcription failed";
+        try {
+          const data = await res.json();
+          message = data.error || data.message || message;
+        } catch {
+          // ignore
+        }
+        throw new Error(message);
+      }
+
+      const data = (await res.json()) as { transcript?: string };
+      const transcript = (data.transcript || "").trim();
+
+      if (!transcript) {
+        alert("Could not understand the audio. Please try again.");
+        return;
+      }
+
+      setComment((prev) => {
+        const base = prev.trim();
+        if (!base) return transcript.slice(0, 500);
+        const combined = `${base}\n\n[Voice note]: ${transcript}`;
+        return combined.slice(0, 500);
+      });
+    } catch (error: any) {
+      console.error("Transcription error:", error);
+      alert(error?.message || "Failed to transcribe audio");
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        await sendForTranscription(blob);
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error("Mic access error:", error);
+      alert("Could not access microphone. Please check your browser settings.");
+    }
+  }, [sendForTranscription]);
+
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+    setIsRecording(false);
+  }, []);
+
   const handleSubmit = () => {
     if (!teacher || rating === 0) return;
-    onSubmit(teacher.id, rating, comment);
+    onSubmit(teacher.id, rating, comment, isAnonymous, doubt.trim() || undefined);
   };
 
   const handleClose = () => {
     setRating(0);
     setComment("");
+    setIsAnonymous(false);
+    setDoubt("");
     onOpenChange(false);
   };
 
@@ -83,6 +202,22 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
           <div className="flex items-center justify-between">
             <span className="font-medium" data-testid="text-teacher-feedback-name">{teacher.name}</span>
             <Badge variant="secondary">{teacher.department}</Badge>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="doubt">Your Doubt (Optional)</Label>
+              <span className="text-xs text-muted-foreground">
+                {doubt.length}/300
+              </span>
+            </div>
+            <Textarea
+              id="doubt"
+              placeholder="Ask any question or doubt you still have about this lecture..."
+              value={doubt}
+              onChange={(e) => setDoubt(e.target.value.slice(0, 300))}
+              className="min-h-[80px] resize-none"
+            />
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <BookOpen className="h-4 w-4" />
@@ -116,6 +251,22 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
             <div className="flex items-center justify-between">
               <Label htmlFor="comment">Your Feedback (Optional)</Label>
               <div className="flex items-center gap-2">
+                {transcriptionEnabled && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant={isRecording ? "destructive" : "outline"}
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={isTranscribing}
+                    data-testid="button-voice-feedback"
+                  >
+                    {isRecording ? (
+                      <MicOff className="h-4 w-4" />
+                    ) : (
+                      <Mic className="h-4 w-4" />
+                    )}
+                  </Button>
+                )}
                 <FeedbackTemplates onSelectTemplate={handleTemplateSelect} />
                 <span className="text-xs text-muted-foreground">
                   {comment.length}/500
@@ -130,6 +281,34 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
               className="min-h-[120px] resize-none"
               data-testid="input-feedback-comment"
             />
+            {isRecording && (
+              <p className="text-xs text-amber-600 mt-1">
+                Recording... click the mic again to stop.
+              </p>
+            )}
+            {isTranscribing && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Converting your voice to text...
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center gap-2">
+              <input
+                id="anonymous"
+                type="checkbox"
+                className="h-4 w-4 rounded border border-input"
+                checked={isAnonymous}
+                onChange={(e) => setIsAnonymous(e.target.checked)}
+              />
+              <Label htmlFor="anonymous" className="text-sm">
+                Submit anonymously
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground max-w-xs text-right">
+              Your name is hidden from teachers, but the system may still use your account to prevent duplicate feedback.
+            </p>
           </div>
         </div>
 

@@ -4,7 +4,8 @@ import {
   type Feedback, type InsertFeedback,
   type Reply, type InsertReply,
   type FeedbackAnalysis, type TeacherSummary, type ChatHistory,
-  users, teachers, feedback, replies, feedbackAnalysis, teacherSummaries, chatHistory
+  type Doubt, type InsertDoubt,
+  users, teachers, feedback, replies, feedbackAnalysis, teacherSummaries, chatHistory, doubts
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
@@ -45,6 +46,10 @@ export interface IStorage {
   getMostFeedbackTeachers(limit?: number): Promise<Array<Teacher & { rank: number }>>;
   getMostImprovedTeachers(limit?: number): Promise<Array<Teacher & { rank: number; improvement: number }>>;
   getRecentActivity(limit?: number): Promise<Array<Feedback & { teacherName: string }>>;
+  createDoubt(doubt: Omit<InsertDoubt, "teacherId" | "studentId" | "studentName"> & { teacherId: string; studentId: string; studentName: string }): Promise<Doubt>;
+  getDoubtsByTeacher(teacherId: string): Promise<Doubt[]>;
+  getDoubtsByStudent(studentId: string): Promise<Doubt[]>;
+  answerDoubt(doubtId: string, answer: string): Promise<Doubt>;
   
   saveFeedbackAnalysis(data: {
     feedbackId: string;
@@ -324,6 +329,45 @@ export class DatabaseStorage implements IStorage {
     );
 
     return feedbackWithTeachers;
+  }
+
+  async createDoubt(doubtData: Omit<InsertDoubt, "teacherId" | "studentId" | "studentName"> & { teacherId: string; studentId: string; studentName: string }): Promise<Doubt> {
+    const [newDoubt] = await db
+      .insert(doubts)
+      .values(doubtData)
+      .returning();
+    return newDoubt;
+  }
+
+  async getDoubtsByTeacher(teacherId: string): Promise<Doubt[]> {
+    return db
+      .select()
+      .from(doubts)
+      .where(eq(doubts.teacherId, teacherId))
+      .orderBy(desc(doubts.createdAt));
+  }
+
+  async getDoubtsByStudent(studentId: string): Promise<Doubt[]> {
+    return db
+      .select()
+      .from(doubts)
+      .where(eq(doubts.studentId, studentId))
+      .orderBy(desc(doubts.createdAt));
+  }
+
+  async answerDoubt(doubtId: string, answer: string): Promise<Doubt> {
+    const [updated] = await db
+      .update(doubts)
+      .set({
+        answer,
+        status: "answered",
+        answeredAt: new Date(),
+      })
+      .where(eq(doubts.id, doubtId))
+      .returning();
+
+    if (!updated) throw new Error("Doubt not found");
+    return updated;
   }
 
   async saveFeedbackAnalysis(data: {

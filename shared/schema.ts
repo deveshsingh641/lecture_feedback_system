@@ -88,6 +88,18 @@ export const favorites = pgTable("favorites", {
   uniqueFavorite: unique().on(table.studentId, table.teacherId),
 }));
 
+export const doubts = pgTable("doubts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  teacherId: varchar("teacher_id").notNull().references(() => teachers.id, { onDelete: "cascade" }),
+  studentId: varchar("student_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  studentName: text("student_name").notNull(),
+  question: text("question").notNull(),
+  answer: text("answer"),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at").defaultNow(),
+  answeredAt: timestamp("answered_at"),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
@@ -134,6 +146,15 @@ export const insertFeedbackSchema = createInsertSchema(feedback).omit({
   subject: true,
 });
 
+export const insertDoubtSchema = createInsertSchema(doubts).omit({
+  id: true,
+  createdAt: true,
+  answeredAt: true,
+  status: true,
+  studentName: true,
+  studentId: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertTeacher = z.infer<typeof insertTeacherSchema>;
@@ -147,3 +168,5 @@ export type FeedbackAnalysis = typeof feedbackAnalysis.$inferSelect;
 export type TeacherSummary = typeof teacherSummaries.$inferSelect;
 export type ChatHistory = typeof chatHistory.$inferSelect;
 export type Favorite = typeof favorites.$inferSelect;
+export type InsertDoubt = z.infer<typeof insertDoubtSchema>;
+export type Doubt = typeof doubts.$inferSelect;

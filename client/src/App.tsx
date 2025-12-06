@@ -17,6 +17,7 @@ import TeacherProfile from "@/pages/TeacherProfile";
 import EditTeacherProfile from "@/pages/EditTeacherProfile";
 import Analytics from "@/pages/Analytics";
 import AdminPanel from "@/pages/AdminPanel";
+import QrFeedbackPage from "@/pages/QrFeedbackPage";
 
 function ProtectedRoute({ 
   children, 
@@ -107,6 +108,10 @@ function Router() {
         <ProtectedRoute allowedRoles={["teacher"]}>
           <TeacherDashboard />
         </ProtectedRoute>
+      </Route>
+
+      <Route path="/qr-feedback/:teacherId">
+        <QrFeedbackPage />
       </Route>
       
       <Route path="/admin">

@@ -8,8 +8,20 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
+import multer from "multer";
+import OpenAI from "openai";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "edufeedback-secret-key";
+
+const DEFAULT_ABUSIVE_WORDS = ["idiot", "stupid", "dumb", "bastard", "bloody", "fuck", "shit"];
+const ENV_ABUSE_WORDS = process.env.ABUSE_WORDS
+  ? process.env.ABUSE_WORDS.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean)
+  : [];
+const ABUSIVE_WORDS = ENV_ABUSE_WORDS.length > 0 ? ENV_ABUSE_WORDS : DEFAULT_ABUSIVE_WORDS;
+
+const upload = multer({
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 interface AuthRequest extends Request {
   user?: {
@@ -65,6 +77,48 @@ export async function registerRoutes(
         ...data,
         username: data.email.split("@")[0],
       });
+
+  // Doubt Wall Routes
+  app.get("/api/doubts/my", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const items = await storage.getDoubtsByStudent(req.user!.id);
+      res.json(items);
+    } catch (error) {
+      console.error("Get student doubts error:", error);
+      res.status(500).json({ error: "Failed to get doubts" });
+    }
+  });
+
+  app.get("/api/doubts/teacher", authenticateToken, requireRole("teacher"), async (req: AuthRequest, res) => {
+    try {
+      // For now, teachers see all doubts; in a more advanced linking, we'd filter by teacher user
+      const teacherList = await storage.getTeachers();
+      const allDoubts = [] as any[];
+      for (const t of teacherList) {
+        const doubts = await storage.getDoubtsByTeacher(t.id);
+        allDoubts.push(...doubts.map((d) => ({ ...d, teacherName: t.name })));
+      }
+      allDoubts.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+      res.json(allDoubts);
+    } catch (error) {
+      console.error("Get teacher doubts error:", error);
+      res.status(500).json({ error: "Failed to get doubts" });
+    }
+  });
+
+  app.post("/api/doubts/:id/answer", authenticateToken, requireRole("teacher", "admin"), async (req: AuthRequest, res) => {
+    try {
+      const { answer } = req.body as { answer?: string };
+      if (!answer || !answer.trim()) {
+        return res.status(400).json({ error: "Answer is required" });
+      }
+      const updated = await storage.answerDoubt(req.params.id, answer.trim());
+      res.json(updated);
+    } catch (error) {
+      console.error("Answer doubt error:", error);
+      res.status(500).json({ error: "Failed to answer doubt" });
+    }
+  });
 
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role, name: user.name },
@@ -279,16 +333,76 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/feedback/transcribe-enabled", (_req, res) => {
+    const enabled = !!process.env.OPENAI_API_KEY;
+    res.json({ enabled });
+  });
+
+  app.post(
+    "/api/feedback/transcribe",
+    authenticateToken,
+    requireRole("student"),
+    upload.single("audio"),
+    async (req: AuthRequest, res) => {
+      try {
+        if (!process.env.OPENAI_API_KEY) {
+          return res.status(500).json({ error: "Transcription service not configured" });
+        }
+
+        const openai = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY,
+        });
+
+        const file = (req as any).file as Express.Multer.File | undefined;
+        if (!file) {
+          return res.status(400).json({ error: "Audio file is required" });
+        }
+
+        const audioBlob = new Blob([file.buffer], {
+          type: file.mimetype || "audio/webm",
+        });
+
+        const response = await openai.audio.transcriptions.create({
+          file: audioBlob as any,
+          model: "gpt-4o-transcribe",
+        });
+
+        const transcript = (response as any).text || "";
+
+        if (!transcript.trim()) {
+          return res.status(500).json({ error: "Could not generate transcription" });
+        }
+
+        res.json({ transcript });
+      } catch (error: any) {
+        console.error("Transcription error:", error);
+        res.status(500).json({
+          error: error?.message || "Failed to transcribe audio. Please try again.",
+        });
+      }
+    }
+  );
+
   app.post("/api/feedback", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
     try {
       // Normalize empty comment strings to undefined
       const body = {
         ...req.body,
         comment: req.body.comment && req.body.comment.trim() ? req.body.comment.trim() : undefined,
+        doubt: req.body.doubt && req.body.doubt.trim() ? req.body.doubt.trim() : undefined,
       };
       
       console.log("Feedback submission request:", { body, user: req.user });
       const data = insertFeedbackSchema.parse(body);
+
+      // Simple abuse-word filter on comment
+      if (data.comment) {
+        const lower = data.comment.toLowerCase();
+        const hasAbuse = ABUSIVE_WORDS.some((w) => lower.includes(w));
+        if (hasAbuse) {
+          return res.status(400).json({ error: "Please remove inappropriate language from your feedback before submitting." });
+        }
+      }
       
       // Check for duplicate feedback
       const hasExisting = await storage.hasFeedback(data.teacherId, req.user!.id);
@@ -301,16 +415,28 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Teacher not found" });
       }
 
+      const anonymous = !!body.anonymous;
+
       const feedbackData: Parameters<typeof storage.createFeedback>[0] = {
         teacherId: data.teacherId,
         rating: data.rating,
         comment: data.comment || undefined,
         studentId: req.user!.id,
-        studentName: req.user!.name,
+        studentName: anonymous ? "Anonymous Student" : req.user!.name,
         subject: teacher.subject,
       };
       
       const newFeedback = await storage.createFeedback(feedbackData);
+
+      if (body.doubt) {
+        await storage.createDoubt({
+          teacherId: data.teacherId,
+          studentId: req.user!.id,
+          studentName: anonymous ? "Anonymous Student" : req.user!.name,
+          question: body.doubt,
+          answer: null,
+        });
+      }
 
       res.status(201).json(newFeedback);
     } catch (error) {
@@ -325,6 +451,62 @@ export async function registerRoutes(
         console.error("Error stack:", error.stack);
       }
       res.status(500).json({ error: "Failed to submit feedback", message: error instanceof Error ? error.message : "Unknown error" });
+    }
+  });
+
+  // Public QR feedback submission (no auth)
+  app.post("/api/qr-feedback/:teacherId", async (req: Request, res: Response) => {
+    try {
+      const { teacherId } = req.params;
+      const { rating, comment } = req.body as { rating?: number; comment?: string };
+
+      if (typeof rating !== "number" || rating < 1 || rating > 5) {
+        return res.status(400).json({ error: "Rating must be a number between 1 and 5" });
+      }
+
+      const safeComment = typeof comment === "string" && comment.trim() ? comment.trim() : undefined;
+
+      if (safeComment) {
+        const lower = safeComment.toLowerCase();
+        const hasAbuse = ABUSIVE_WORDS.some((w) => lower.includes(w));
+        if (hasAbuse) {
+          return res.status(400).json({ error: "Please remove inappropriate language from your feedback before submitting." });
+        }
+      }
+
+      const teacher = await storage.getTeacher(teacherId);
+      if (!teacher) {
+        return res.status(404).json({ error: "Teacher not found" });
+      }
+
+      // Ensure there is a special "QR" user to associate anonymous QR feedback with
+      const qrEmail = "qr-feedback@internal.local";
+      let qrUser = await storage.getUserByEmail(qrEmail);
+      if (!qrUser) {
+        qrUser = await storage.createUser({
+          name: "QR Feedback Student",
+          email: qrEmail,
+          password: "qr-feedback-temp-password",
+          username: qrEmail.split("@")[0],
+          role: "student",
+          department: "QR",
+        });
+      }
+
+      const feedbackData: Parameters<typeof storage.createFeedback>[0] = {
+        teacherId,
+        studentId: qrUser.id,
+        studentName: "QR Student",
+        rating,
+        comment: safeComment,
+        subject: teacher.subject,
+      };
+
+      const newFeedback = await storage.createFeedback(feedbackData);
+      res.status(201).json(newFeedback);
+    } catch (error) {
+      console.error("QR feedback error:", error);
+      res.status(500).json({ error: "Failed to submit QR feedback" });
     }
   });
 

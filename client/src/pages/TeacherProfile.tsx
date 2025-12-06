@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Star, Users, MessageSquare, TrendingUp, Award, Calendar, Edit, Clock, Mail, BookOpen, User, BarChart3, Activity, Target, Zap, ThumbsUp } from "lucide-react";
+import { Star, Users, MessageSquare, TrendingUp, Award, Calendar, Edit, Clock, Mail, BookOpen, User, BarChart3, Activity, Target, Zap, ThumbsUp, QrCode } from "lucide-react";
 import { SkillBadges } from "@/components/SkillBadges";
 import { RatingProgress } from "@/components/ProgressBar";
 import { FeedbackDetailModal } from "@/components/FeedbackDetailModal";
@@ -199,6 +199,27 @@ export default function TeacherProfile() {
 
         {/* Enhanced Stats Cards */}
         <div className="space-y-4">
+          <Card className="hover-lift animate-slideInDown">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <QrCode className="h-4 w-4" />
+                QR Quick Feedback Link
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground mb-2">
+                Share this link as a QR code or short URL so students can give fast feedback for this teacher without logging in.
+              </p>
+              <div className="rounded-md border border-dashed border-muted p-2 bg-muted/30">
+                <p className="text-[11px] break-all font-mono">
+                  {typeof window !== "undefined"
+                    ? `${window.location.origin}/qr-feedback/${teacher.id}`
+                    : `/qr-feedback/${teacher.id}`}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="hover-lift animate-slideInDown">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">

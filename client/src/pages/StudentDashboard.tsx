@@ -51,7 +51,7 @@ export default function StudentDashboard() {
   const [showConfetti, setShowConfetti] = useState(false);
 
   const feedbackMutation = useMutation({
-    mutationFn: async (data: { teacherId: string; rating: number; comment: string }) => {
+    mutationFn: async (data: { teacherId: string; rating: number; comment: string; anonymous?: boolean; doubt?: string }) => {
       const res = await apiRequest("POST", "/api/feedback", data);
       return res.json();
     },
@@ -141,8 +141,8 @@ export default function StudentDashboard() {
     setFeedbackDialogOpen(true);
   };
 
-  const handleSubmitFeedback = (teacherId: string, rating: number, comment: string) => {
-    feedbackMutation.mutate({ teacherId, rating, comment });
+  const handleSubmitFeedback = (teacherId: string, rating: number, comment: string, anonymous: boolean, doubt?: string) => {
+    feedbackMutation.mutate({ teacherId, rating, comment, anonymous, doubt });
   };
 
   const totalFeedbackGiven = submittedTeacherIds.length;
