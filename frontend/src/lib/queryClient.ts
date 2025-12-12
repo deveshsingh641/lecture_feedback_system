@@ -4,6 +4,14 @@ function getAuthToken(): string | null {
   return localStorage.getItem("token");
 }
 
+function withApiBase(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  const base = (import.meta as any).env?.VITE_API_URL as string | undefined;
+  if (!base) return url;
+  if (!url.startsWith("/")) return `${base.replace(/\/$/, "")}/${url}`;
+  return `${base.replace(/\/$/, "")}${url}`;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     let errorMessage = res.statusText;
@@ -33,6 +41,8 @@ export async function apiRequest(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  url = withApiBase(url);
+
   const res = await fetch(url, {
     method,
     headers,
@@ -57,7 +67,7 @@ export const getQueryFn: <T>(options: {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const url = queryKey.join("/") as string;
+    const url = withApiBase(queryKey.join("/") as string);
     
     try {
       const res = await fetch(url, {

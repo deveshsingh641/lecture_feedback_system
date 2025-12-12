@@ -1,6 +1,7 @@
 import { build as esbuild } from "esbuild";
-import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, mkdir, cp } from "fs/promises";
+import path from "path";
+import { execSync } from "child_process";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -35,8 +36,19 @@ const allowlist = [
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
-  console.log("building client...");
-  await viteBuild();
+  console.log("building frontend...");
+  const frontendRoot = path.resolve(process.cwd(), "..", "frontend");
+  execSync("npm run build", {
+    cwd: frontendRoot,
+    stdio: "inherit",
+    env: process.env,
+    shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+  });
+
+  const frontendDist = path.resolve(frontendRoot, "dist");
+  const publicOut = path.resolve(process.cwd(), "dist", "public");
+  await mkdir(publicOut, { recursive: true });
+  await cp(frontendDist, publicOut, { recursive: true });
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
@@ -47,7 +59,7 @@ async function buildAll() {
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
   await esbuild({
-    entryPoints: ["server/index.ts"],
+    entryPoints: ["index.ts"],
     platform: "node",
     bundle: true,
     format: "cjs",

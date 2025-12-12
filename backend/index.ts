@@ -1,18 +1,31 @@
 // Load environment variables FIRST
 import dotenv from "dotenv";
+import path from "path";
+
 dotenv.config();
+if (!process.env.DATABASE_URL) {
+  dotenv.config({ path: path.resolve(process.cwd(), "..", ".env") });
+}
 
 // Debug print
 console.log("Loaded DATABASE_URL =", process.env.DATABASE_URL);
 
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
 import { createServer } from "http";
-import path from "path";
+import fs from "fs";
 
 const app = express();
 const httpServer = createServer(app);
+
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(
+  cors({
+    origin: corsOrigin ? corsOrigin.split(",").map((s) => s.trim()).filter(Boolean) : true,
+    credentials: true,
+  }),
+);
 
 declare module "http" {
   interface IncomingMessage {
@@ -29,6 +42,10 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+app.get("/", (_req, res) => {
+  res.status(200).send("Backend is running. Frontend is served separately.");
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -86,31 +103,21 @@ app.use((req, res, next) => {
       res.status(status).json({ message });
     });
 
-    // Serve Vite or static depending on environment
+    // Serve built frontend from the same server in production
     if (process.env.NODE_ENV === "production") {
-      log("Using static file serving (production mode)");
       const publicDir = path.resolve(process.cwd(), "dist", "public");
-      app.use(express.static(publicDir));
-      app.use("*", (req, res) => {
-        res.sendFile(path.join(publicDir, "index.html"));
-      });
-    } else {
-      try {
-        const { setupVite } = await import("./vite");
-        await setupVite(httpServer, app);
-      } catch (viteError) {
-        log("Vite setup failed, falling back to static serving");
-        console.error("Vite error:", viteError);
-        const publicDir = path.resolve(process.cwd(), "dist", "public");
+      if (fs.existsSync(publicDir)) {
         app.use(express.static(publicDir));
-        app.use("*", (req, res) => {
+        app.get("*", (_req, res) => {
           res.sendFile(path.join(publicDir, "index.html"));
         });
+      } else {
+        log(`Frontend build not found at ${publicDir}`, "express");
       }
     }
 
-    // Use the PORT from environment or default to 5000
-    const port = parseInt(process.env.PORT || "5000", 10);
+    // Use the PORT from environment or default to 5001
+    const port = parseInt(process.env.BACKEND_PORT || process.env.PORT || "5001", 10);
     httpServer.listen(port, "0.0.0.0", () => {
       const url = `http://localhost:${port}`;
       log(`serving on port ${port}`);

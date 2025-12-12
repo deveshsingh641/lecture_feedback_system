@@ -1,6 +1,11 @@
 // Load environment variables FIRST
 import dotenv from "dotenv";
+import path from "path";
+
 dotenv.config();
+if (!process.env.DATABASE_URL) {
+  dotenv.config({ path: path.resolve(process.cwd(), "..", ".env") });
+}
 
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
