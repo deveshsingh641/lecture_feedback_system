@@ -22,32 +22,35 @@ export function ReplyForm({ feedbackId, onSuccess, feedbackComment }: ReplyFormP
 
   const { data: templatesData, isLoading: templatesLoading } = useQuery<{
     templates: string[];
-  }>({
+  }, Error>({
     queryKey: ["/api/ai/reply-templates", feedbackId],
     enabled: !!feedbackComment && !!user,
     queryFn: async () => {
-      const res = await fetch("/api/ai/reply-templates", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-        body: JSON.stringify({ comment: feedbackComment }),
-      });
+      try {
+        const res = await fetch("/api/ai/reply-templates", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+          body: JSON.stringify({ comment: feedbackComment }),
+        });
 
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({} as any));
-        throw new Error(error.error || "Failed to load reply templates");
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({} as any));
+          throw new Error(error.error || "Failed to load reply templates");
+        }
+
+        return (await res.json()) as { templates: string[] };
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error("Failed to load reply templates");
+        toast({
+          title: "AI suggestions unavailable",
+          description: err.message,
+          variant: "destructive",
+        });
+        throw err;
       }
-
-      return res.json();
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "AI suggestions unavailable",
-        description: error.message,
-        variant: "destructive",
-      });
     },
   });
 
@@ -107,7 +110,7 @@ export function ReplyForm({ feedbackId, onSuccess, feedbackComment }: ReplyFormP
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">AI Suggestions:</p>
           <div className="flex flex-wrap gap-2">
-            {templatesData.templates.map((t, idx) => (
+            {templatesData.templates.map((t: string, idx: number) => (
               <button
                 key={idx}
                 type="button"

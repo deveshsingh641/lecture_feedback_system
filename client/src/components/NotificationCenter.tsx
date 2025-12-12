@@ -23,7 +23,7 @@ export function NotificationCenter() {
 
   // Get recent activity as notifications
   const { data: notifications = [] } = useQuery<NotificationItem[]>({
-    queryKey: ["/api/activity/recent", 10],
+    queryKey: ["/api/activity/recent?limit=10"],
     refetchInterval: 30000,
   });
 

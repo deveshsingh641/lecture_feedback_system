@@ -2,11 +2,12 @@ import { useMemo, useState } from "react";
 import { StatCard } from "@/components/StatCard";
 import { FeedbackItem } from "@/components/FeedbackItem";
 import { RatingChart } from "@/components/RatingChart";
+import { TeacherInsightsPanel } from "@/components/TeacherInsightsPanel";
 import { SearchFilter } from "@/components/SearchFilter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MessageSquare, Star, TrendingUp, Users } from "lucide-react";
+import { MessageSquare, Star, TrendingUp, Users, Sparkles } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,6 +60,9 @@ export default function TeacherDashboard() {
     ? feedback.reduce((sum, f) => sum + f.rating, 0) / totalFeedback 
     : 0;
   const uniqueStudents = new Set(feedback.map((f) => f.studentName)).size;
+
+  const openDoubts = doubts.filter((d) => d.status !== "answered").length;
+  const answeredDoubts = doubts.filter((d) => d.status === "answered").length;
 
   const ratingDistribution = useMemo(() => {
     const counts = [0, 0, 0, 0, 0];
@@ -122,6 +126,13 @@ export default function TeacherDashboard() {
     });
     return copy;
   }, [doubts]);
+
+  const aiReplyMutation = useMutation({
+    mutationFn: async ({ question }: { question: string }) => {
+      const res = await apiRequest("POST", "/api/ai/reply-templates", { comment: question });
+      return res.json() as Promise<{ templates?: string[] }>;
+    },
+  });
 
   if (isLoading) {
     return (
@@ -197,10 +208,10 @@ export default function TeacherDashboard() {
             icon={Users}
           />
           <StatCard
-            title="5-Star Ratings"
-            value={ratingDistribution[4].count}
-            subtitle={`${totalFeedback > 0 ? Math.round((ratingDistribution[4].count / totalFeedback) * 100) : 0}% of total`}
-            icon={TrendingUp}
+            title="Open Doubts"
+            value={openDoubts}
+            subtitle={`${answeredDoubts} answered`}
+            icon={MessageSquare}
           />
         </div>
 
@@ -250,6 +261,18 @@ export default function TeacherDashboard() {
           </TabsContent>
 
           <TabsContent value="doubts" className="space-y-6">
+            <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+              <span>
+                <span className="font-semibold text-foreground">{openDoubts}</span> open doubts
+              </span>
+              <span>
+                <span className="font-semibold text-foreground">{answeredDoubts}</span> answered
+              </span>
+              <span>
+                <span className="font-semibold text-foreground">{doubts.length}</span> total
+              </span>
+            </div>
+
             <div className="space-y-4">
               {sortedDoubts.map((doubt) => (
                 <Card key={doubt.id} className="border-l-4 border-l-sky-500">
@@ -282,16 +305,42 @@ export default function TeacherDashboard() {
                             setAnswerDrafts((prev) => ({ ...prev, [doubt.id]: e.target.value }))
                           }
                         />
-                        <button
-                          type="button"
-                          className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                          onClick={() =>
-                            answerMutation.mutate({ id: doubt.id, answer: (answerDrafts[doubt.id] || "").trim() })
-                          }
-                          disabled={answerMutation.isPending || !(answerDrafts[doubt.id] || "").trim()}
-                        >
-                          {answerMutation.isPending ? "Sending..." : "Send Answer"}
-                        </button>
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-md border border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-50"
+                            onClick={async () => {
+                              if (!doubt.question?.trim()) return;
+                              try {
+                                const data = await aiReplyMutation.mutateAsync({ question: doubt.question });
+                                const first = (data.templates || []).find((t) => typeof t === "string" && t.trim().length > 0);
+                                if (!first) {
+                                  alert("AI could not generate a reply suggestion. Please try again later.");
+                                  return;
+                                }
+                                setAnswerDrafts((prev) => ({ ...prev, [doubt.id]: first.trim() }));
+                              } catch (error: any) {
+                                console.error("AI reply suggestion error:", error);
+                                alert(error?.message || "Failed to generate AI reply suggestion");
+                              }
+                            }}
+                            disabled={aiReplyMutation.isPending}
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            {aiReplyMutation.isPending ? "Generating..." : "Suggest reply with AI"}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                            onClick={() =>
+                              answerMutation.mutate({ id: doubt.id, answer: (answerDrafts[doubt.id] || "").trim() })
+                            }
+                            disabled={answerMutation.isPending || !(answerDrafts[doubt.id] || "").trim()}
+                          >
+                            {answerMutation.isPending ? "Sending..." : "Send Answer"}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -309,24 +358,33 @@ export default function TeacherDashboard() {
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <RatingChart data={ratingDistribution} />
-              
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg font-medium">Performance Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {ratingDistribution.slice().reverse().map((item) => (
-                    <div key={item.rating} className="flex items-center justify-between py-2 border-b last:border-0">
-                      <span className="text-sm text-muted-foreground">{item.rating}-star ratings</span>
-                      <span className="font-medium">
-                        {item.count} ({totalFeedback > 0 ? Math.round((item.count / totalFeedback) * 100) : 0}%)
-                      </span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <div className="xl:col-span-2 space-y-6">
+                <RatingChart data={ratingDistribution} />
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg font-medium">Performance Breakdown</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {ratingDistribution.slice().reverse().map((item) => (
+                      <div key={item.rating} className="flex items-center justify-between py-2 border-b last:border-0">
+                        <span className="text-sm text-muted-foreground">{item.rating}-star ratings</span>
+                        <span className="font-medium">
+                          {item.count} ({totalFeedback > 0 ? Math.round((item.count / totalFeedback) * 100) : 0}%)
+                        </span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <TeacherInsightsPanel
+                totalFeedback={totalFeedback}
+                averageRating={averageRating}
+                uniqueStudents={uniqueStudents}
+                ratingDistribution={ratingDistribution}
+              />
             </div>
           </TabsContent>
         </Tabs>

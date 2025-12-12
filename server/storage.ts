@@ -5,7 +5,8 @@ import {
   type Reply, type InsertReply,
   type FeedbackAnalysis, type TeacherSummary, type ChatHistory,
   type Doubt, type InsertDoubt,
-  users, teachers, feedback, replies, feedbackAnalysis, teacherSummaries, chatHistory, doubts
+  type Favorite,
+  users, teachers, feedback, replies, feedbackAnalysis, teacherSummaries, chatHistory, doubts, favorites
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
@@ -50,6 +51,9 @@ export interface IStorage {
   getDoubtsByTeacher(teacherId: string): Promise<Doubt[]>;
   getDoubtsByStudent(studentId: string): Promise<Doubt[]>;
   answerDoubt(doubtId: string, answer: string): Promise<Doubt>;
+  getFavoritesByStudent(studentId: string): Promise<Favorite[]>;
+  addFavorite(studentId: string, teacherId: string): Promise<Favorite>;
+  removeFavorite(studentId: string, teacherId: string): Promise<void>;
   
   saveFeedbackAnalysis(data: {
     feedbackId: string;
@@ -368,6 +372,37 @@ export class DatabaseStorage implements IStorage {
 
     if (!updated) throw new Error("Doubt not found");
     return updated;
+  }
+
+  async getFavoritesByStudent(studentId: string): Promise<Favorite[]> {
+    return db
+      .select()
+      .from(favorites)
+      .where(eq(favorites.studentId, studentId))
+      .orderBy(desc(favorites.createdAt));
+  }
+
+  async addFavorite(studentId: string, teacherId: string): Promise<Favorite> {
+    const [fav] = await db
+      .insert(favorites)
+      .values({ studentId, teacherId })
+      .onConflictDoNothing()
+      .returning();
+    // If onConflictDoNothing prevented insert, fetch existing
+    if (!fav) {
+      const [existing] = await db
+        .select()
+        .from(favorites)
+        .where(and(eq(favorites.studentId, studentId), eq(favorites.teacherId, teacherId)));
+      return existing;
+    }
+    return fav;
+  }
+
+  async removeFavorite(studentId: string, teacherId: string): Promise<void> {
+    await db
+      .delete(favorites)
+      .where(and(eq(favorites.studentId, studentId), eq(favorites.teacherId, teacherId)));
   }
 
   async saveFeedbackAnalysis(data: {

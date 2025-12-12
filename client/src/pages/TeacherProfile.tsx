@@ -120,16 +120,21 @@ export default function TeacherProfile() {
                 <div className="flex items-start gap-4 flex-1">
                   <Avatar className="h-20 w-20">
                     {teacher.profileImage && (
-                      <AvatarImage src={teacher.profileImage} alt={teacher.name} />
+                      <AvatarImage src={teacher.profileImage} alt={teacher.name ?? "Teacher"} />
                     )}
                     <AvatarFallback className="bg-primary/10 text-primary text-xl">
-                      {teacher.name.split(" ").map((n) => n[0]).join("")}
+                      {(teacher.name ?? "")
+                        .trim()
+                        .split(/\s+/)
+                        .filter(Boolean)
+                        .map((n) => n[0])
+                        .join("") || "T"}
                     </AvatarFallback>
                   </Avatar>
                   <div className="space-y-2 flex-1">
                     <div className="flex items-start justify-between">
                       <div>
-                        <CardTitle className="text-3xl">{teacher.name}</CardTitle>
+                        <CardTitle className="text-3xl">{teacher.name ?? "Teacher"}</CardTitle>
                         <CardDescription className="text-base">
                           {teacher.subject} • {teacher.department}
                         </CardDescription>

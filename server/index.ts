@@ -89,9 +89,10 @@ app.use((req, res, next) => {
     // Serve Vite or static depending on environment
     if (process.env.NODE_ENV === "production") {
       log("Using static file serving (production mode)");
-      app.use(express.static(path.resolve(import.meta.dirname, "..", "dist", "public")));
+      const publicDir = path.resolve(process.cwd(), "dist", "public");
+      app.use(express.static(publicDir));
       app.use("*", (req, res) => {
-        res.sendFile(path.resolve(import.meta.dirname, "..", "dist", "public", "index.html"));
+        res.sendFile(path.join(publicDir, "index.html"));
       });
     } else {
       try {
@@ -100,16 +101,17 @@ app.use((req, res, next) => {
       } catch (viteError) {
         log("Vite setup failed, falling back to static serving");
         console.error("Vite error:", viteError);
-        app.use(express.static(path.resolve(import.meta.dirname, "..", "dist", "public")));
+        const publicDir = path.resolve(process.cwd(), "dist", "public");
+        app.use(express.static(publicDir));
         app.use("*", (req, res) => {
-          res.sendFile(path.resolve(import.meta.dirname, "..", "dist", "public", "index.html"));
+          res.sendFile(path.join(publicDir, "index.html"));
         });
       }
     }
 
     // Use the PORT from environment or default to 5000
     const port = parseInt(process.env.PORT || "5000", 10);
-    httpServer.listen(port, "localhost", () => {
+    httpServer.listen(port, "0.0.0.0", () => {
       const url = `http://localhost:${port}`;
       log(`serving on port ${port}`);
       console.log("");

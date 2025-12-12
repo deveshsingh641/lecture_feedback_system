@@ -41,6 +41,7 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
   const [transcriptionEnabled, setTranscriptionEnabled] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [doubt, setDoubt] = useState("");
+  const [isImproving, setIsImproving] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
 
@@ -179,6 +180,75 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
     onOpenChange(false);
   };
 
+  const handleImproveFeedback = useCallback(async () => {
+    if (!comment.trim()) return;
+    try {
+      setIsImproving(true);
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/ai/improve-feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ comment }),
+      });
+
+      if (!res.ok) {
+        let message = "Failed to improve feedback";
+        try {
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await res.json();
+            message = (data as any).error || (data as any).message || message;
+          } else {
+            const text = await res.text();
+            if (text && !text.startsWith("<")) {
+              message = text;
+            }
+          }
+        } catch {
+          // ignore parse errors and keep default message
+        }
+        throw new Error(message);
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      let improved: string | undefined;
+
+      if (contentType.includes("application/json")) {
+        const data = (await res.json()) as { improvedComment?: string };
+        if (data.improvedComment && typeof data.improvedComment === "string") {
+          improved = data.improvedComment;
+        }
+      } else {
+        // Fallback: try to use plain text body as improved feedback
+        const text = await res.text();
+        if (text && !text.startsWith("<")) {
+          improved = text;
+        }
+      }
+
+      if (!improved || !improved.trim()) {
+        alert("AI could not improve your feedback. Please try again later.");
+        return;
+      }
+
+      const normalizedImproved = improved.trim();
+      if (normalizedImproved === comment.trim()) {
+        alert("Your feedback already looks clear and constructive, so no changes were suggested.");
+        return;
+      }
+
+      setComment(normalizedImproved.slice(0, 500));
+    } catch (error: any) {
+      console.error("Improve feedback error:", error);
+      alert(error?.message || "Failed to improve feedback");
+    } finally {
+      setIsImproving(false);
+    }
+  }, [comment]);
+
   if (!teacher) return null;
 
   return (
@@ -190,7 +260,7 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
         }} 
       />
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle data-testid="dialog-title-feedback">Submit Feedback</DialogTitle>
           <DialogDescription>
@@ -281,6 +351,18 @@ export function FeedbackForm({ teacher, open, onOpenChange, onSubmit, isSubmitti
               className="min-h-[120px] resize-none"
               data-testid="input-feedback-comment"
             />
+            <div className="flex justify-end mt-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="text-xs"
+                onClick={handleImproveFeedback}
+                disabled={isImproving || !comment.trim()}
+              >
+                {isImproving ? "Improving..." : "Improve my feedback with AI"}
+              </Button>
+            </div>
             {isRecording && (
               <p className="text-xs text-amber-600 mt-1">
                 Recording... click the mic again to stop.

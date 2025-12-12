@@ -123,6 +123,14 @@ export const insertTeacherSchema = createInsertSchema(teachers).omit({
   averageRating: true,
   totalFeedback: true,
   createdAt: true,
+}).extend({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Name is required")
+    .refine((v) => v.toLowerCase() !== "name", "Please enter a valid teacher name"),
+  department: z.string().trim().min(1, "Department is required"),
+  subject: z.string().trim().min(1, "Subject is required"),
 });
 
 export const updateTeacherSchema = z.object({

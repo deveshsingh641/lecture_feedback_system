@@ -37,6 +37,13 @@ export function AddTeacherModal({ open, onOpenChange, onSubmit, isSubmitting = f
   const [department, setDepartment] = useState("");
   const [subject, setSubject] = useState("");
 
+  const trimmedName = name.trim();
+  const trimmedDepartment = department.trim();
+  const trimmedSubject = subject.trim();
+
+  const isNameValid = trimmedName.length >= 2 && trimmedName.toLowerCase() !== "name";
+  const isFormValid = isNameValid && trimmedDepartment.length > 0 && trimmedSubject.length > 0;
+
   useEffect(() => {
     if (!open) {
       setName("");
@@ -46,8 +53,8 @@ export function AddTeacherModal({ open, onOpenChange, onSubmit, isSubmitting = f
   }, [open]);
 
   const handleSubmit = () => {
-    if (!name || !department || !subject) return;
-    onSubmit({ name, department, subject });
+    if (!isFormValid) return;
+    onSubmit({ name: trimmedName, department: trimmedDepartment, subject: trimmedSubject });
   };
 
   const handleClose = () => {
@@ -113,7 +120,7 @@ export function AddTeacherModal({ open, onOpenChange, onSubmit, isSubmitting = f
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!name || !department || !subject || isSubmitting}
+            disabled={!isFormValid || isSubmitting}
             data-testid="button-submit-add-teacher"
           >
             {isSubmitting ? "Adding..." : "Add Teacher"}

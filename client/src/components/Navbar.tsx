@@ -39,6 +39,8 @@ export function Navbar() {
       : [
           { href: "/student", label: "Dashboard" },
           { href: "/student/teachers", label: "Teachers" },
+          { href: "/student/feedback", label: "My Feedback" },
+          { href: "/favorites", label: "Favourites" },
         ]
     : [];
 

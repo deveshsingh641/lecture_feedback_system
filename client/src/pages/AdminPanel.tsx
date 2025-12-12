@@ -1,32 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
 import { StatCard } from "@/components/StatCard";
-import { SearchFilter } from "@/components/SearchFilter";
-import { AddTeacherModal } from "@/components/AddTeacherModal";
-import { StarRating } from "@/components/StarRating";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Users, MessageSquare, Star, Trash2, Plus, GraduationCap } from "lucide-react";
+import { Users, MessageSquare, Star, Plus, GraduationCap, AlertTriangle, ShieldAlert } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Teacher } from "@shared/schema";
@@ -37,13 +14,64 @@ export default function AdminPanel() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("name-asc");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [teacherToDelete, setTeacherToDelete] = useState<Teacher | null>(null);
+  const [slaDays] = useState(5);
+  const [overdueDeptFilter, setOverdueDeptFilter] = useState<string>("all");
+  const [overdueTeacherFilter, setOverdueTeacherFilter] = useState<string>("all");
 
   const { data: teachers = [], isLoading, error } = useQuery<Teacher[]>({
     queryKey: ["/api/teachers"],
   });
+
+  const { data: overdueDoubts = [] } = useQuery<{
+    id: string;
+    teacherId: string;
+    studentName: string;
+    question: string;
+    status: string;
+    createdAt: string | null;
+    answeredAt: string | null;
+    teacherName: string | null;
+    department: string | null;
+  }[]>({
+    queryKey: ["/api/admin/doubts/overdue", slaDays],
+  });
+
+  const { data: flaggedFeedback = [] } = useQuery<{
+    id: string;
+    teacherId: string;
+    studentId: string;
+    studentName: string;
+    rating: number;
+    comment: string | null;
+    subject: string | null;
+    createdAt: string | null;
+    teacherName: string | null;
+    department: string | null;
+  }[]>({
+    queryKey: ["/api/admin/feedback/flagged"],
+  });
+
+  const overdueDepartments = useMemo(
+    () => Array.from(new Set(overdueDoubts.map((d) => d.department).filter((d): d is string => !!d))),
+    [overdueDoubts]
+  );
+
+  const overdueTeachers = useMemo(
+    () => Array.from(new Set(overdueDoubts.map((d) => d.teacherName).filter((t): t is string => !!t))),
+    [overdueDoubts]
+  );
+
+  const filteredOverdueDoubts = useMemo(
+    () =>
+      overdueDoubts.filter((d) => {
+        const matchesDept =
+          overdueDeptFilter === "all" || !d.department || d.department === overdueDeptFilter;
+        const matchesTeacher =
+          overdueTeacherFilter === "all" || !d.teacherName || d.teacherName === overdueTeacherFilter;
+        return matchesDept && matchesTeacher;
+      }),
+    [overdueDoubts, overdueDeptFilter, overdueTeacherFilter]
+  );
 
   useEffect(() => {
     if (error) {
@@ -55,51 +83,6 @@ export default function AdminPanel() {
       });
     }
   }, [error, toast]);
-
-  const addTeacherMutation = useMutation({
-    mutationFn: async (data: { name: string; department: string; subject: string }) => {
-      const res = await apiRequest("POST", "/api/teachers", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/teachers"] });
-      setAddModalOpen(false);
-      toast({
-        title: "Teacher added",
-        description: "New teacher has been added successfully.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Failed to add teacher",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deleteTeacherMutation = useMutation({
-    mutationFn: async (teacherId: string) => {
-      const res = await apiRequest("DELETE", `/api/teachers/${teacherId}`);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/teachers"] });
-      setDeleteDialogOpen(false);
-      setTeacherToDelete(null);
-      toast({
-        title: "Teacher removed",
-        description: "Teacher has been removed from the system.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Failed to remove teacher",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
 
   const departments = useMemo(() => 
     Array.from(new Set(teachers.map((t) => t.department))),
@@ -147,20 +130,27 @@ export default function AdminPanel() {
     ? teachers.reduce((sum, t) => sum + (t.averageRating || 0), 0) / teachers.length 
     : 0;
 
-  const handleAddTeacher = (data: { name: string; department: string; subject: string }) => {
-    addTeacherMutation.mutate(data);
-  };
-
-  const handleDeleteClick = (teacher: Teacher) => {
-    setTeacherToDelete(teacher);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleConfirmDelete = () => {
-    if (teacherToDelete) {
-      deleteTeacherMutation.mutate(teacherToDelete.id);
-    }
-  };
+  const deleteFeedbackMutation = useMutation({
+    mutationFn: async (feedbackId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/feedback/${feedbackId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/feedback/flagged"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/teachers"] });
+      toast({
+        title: "Feedback removed",
+        description: "The selected feedback has been deleted.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to remove feedback",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   if (isLoading) {
     return (
@@ -211,9 +201,11 @@ export default function AdminPanel() {
               Manage teachers and monitor feedback
             </p>
           </div>
-          <Button onClick={() => setAddModalOpen(true)} data-testid="button-add-teacher">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Teacher
+          <Button asChild data-testid="button-add-teacher">
+            <a href="/admin/teachers">
+              <Plus className="mr-2 h-4 w-4" />
+              Manage Teachers
+            </a>
           </Button>
         </div>
 
@@ -244,110 +236,143 @@ export default function AdminPanel() {
           />
         </div>
 
-        <div className="mb-6">
-          <SearchFilter
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            sortBy={sortBy}
-            onSortChange={setSortBy}
-            departments={departments}
-            selectedDepartment={selectedDepartment}
-            onDepartmentChange={setSelectedDepartment}
-            placeholder="Search teachers by name or subject..."
-          />
+        {/* Doubt SLA monitoring & moderation overview */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Overdue Doubts
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Open for more than {slaDays} day{slaDays === 1 ? "" : "s"}
+                </p>
+              </div>
+              <span className="text-2xl font-semibold">{overdueDoubts.length}</span>
+            </CardHeader>
+            <CardContent>
+              {overdueDoubts.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No overdue doubts at the moment.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Dept:</span>
+                      <select
+                        className="border border-border bg-background rounded px-1 py-0.5 text-[11px]"
+                        value={overdueDeptFilter}
+                        onChange={(e) => setOverdueDeptFilter(e.target.value)}
+                      >
+                        <option value="all">All</option>
+                        {overdueDepartments.map((dept) => (
+                          <option key={dept} value={dept}>
+                            {dept}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Teacher:</span>
+                      <select
+                        className="border border-border bg-background rounded px-1 py-0.5 text-[11px]"
+                        value={overdueTeacherFilter}
+                        onChange={(e) => setOverdueTeacherFilter(e.target.value)}
+                      >
+                        <option value="all">All</option>
+                        {overdueTeachers.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {filteredOverdueDoubts.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No overdue doubts for the selected filters.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 text-xs max-h-56 overflow-y-auto">
+                      {filteredOverdueDoubts.map((doubt) => (
+                        <div
+                          key={doubt.id}
+                          className="rounded-md border border-amber-300/60 bg-amber-50/80 px-3 py-2"
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-medium">{doubt.studentName}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {doubt.teacherName || "Unknown"} · {doubt.department || "N/A"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground line-clamp-2">
+                            {doubt.question}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-red-500" />
+                  Moderation Queue
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Feedback flagged for abusive language
+                </p>
+              </div>
+              <span className="text-2xl font-semibold">{flaggedFeedback.length}</span>
+            </CardHeader>
+            <CardContent>
+              {flaggedFeedback.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No flagged feedback at the moment.
+                </p>
+              ) : (
+                <div className="space-y-2 text-xs max-h-56 overflow-y-auto">
+                  {flaggedFeedback.map((fb) => (
+                    <div
+                      key={fb.id}
+                      className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 flex items-start justify-between gap-2"
+                    >
+                      <div>
+                        <p className="font-medium text-sm">
+                          {fb.studentName} → {fb.teacherName || "Unknown"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mb-1">
+                          {fb.subject || "General"} · Rating {fb.rating}/5
+                        </p>
+                        <p className="text-xs text-muted-foreground line-clamp-2">
+                          {fb.comment}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-[11px] text-destructive border-destructive/40 hover:bg-destructive/10"
+                        onClick={() => deleteFeedbackMutation.mutate(fb.id)}
+                        disabled={deleteFeedbackMutation.isPending}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-medium">Teachers</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Teacher</TableHead>
-                    <TableHead>Subject</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Rating</TableHead>
-                    <TableHead className="text-center">Feedback</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTeachers.map((teacher) => (
-                    <TableRow key={teacher.id} data-testid={`row-teacher-${teacher.id}`}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-9 w-9">
-                            <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                              {teacher.name.split(" ").map((n) => n[0]).join("")}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium" data-testid={`text-teacher-name-${teacher.id}`}>{teacher.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>{teacher.subject}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{teacher.department}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <StarRating rating={teacher.averageRating || 0} size="sm" showValue />
-                      </TableCell>
-                      <TableCell className="text-center">{teacher.totalFeedback || 0}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeleteClick(teacher)}
-                          className="text-destructive hover:text-destructive"
-                          data-testid={`button-delete-${teacher.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            {filteredTeachers.length === 0 && (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground" data-testid="text-no-teachers">No teachers found matching your criteria.</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <AddTeacherModal
-          open={addModalOpen}
-          onOpenChange={setAddModalOpen}
-          onSubmit={handleAddTeacher}
-          isSubmitting={addTeacherMutation.isPending}
-        />
-
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle data-testid="dialog-title-delete">Remove Teacher</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to remove {teacherToDelete?.name} from the system? This action cannot be undone and will also delete all associated feedback.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleConfirmDelete}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                data-testid="button-confirm-delete"
-                disabled={deleteTeacherMutation.isPending}
-              >
-                {deleteTeacherMutation.isPending ? "Removing..." : "Remove"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </div>
     </div>
   );

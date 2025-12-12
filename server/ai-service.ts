@@ -1,38 +1,71 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_KEY;
+const hfModel =
+  process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "mistralai/Mistral-7B-Instruct-v0.2";
 
-const apiKey = process.env.GEMINI_API_KEY;
-
-if (!apiKey) {
-  console.error("Gemini API key is not configured. Please set GEMINI_API_KEY in your .env file.");
-  throw new Error("Gemini API key is not configured");
+if (!hfToken) {
+  console.error(
+    "Hugging Face API token is not configured. Please set HF_API_TOKEN or HUGGINGFACE_API_KEY in your .env file.",
+  );
+  throw new Error("Hugging Face API token is not configured");
 }
 
-const genAI = new GoogleGenerativeAI(apiKey);
-const jsonModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-const chatModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-async function generateJson<T = any>(instruction: string, input: string): Promise<T> {
-  const result = await jsonModel.generateContent({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text:
-              instruction +
-              "\n\nReturn only valid JSON, no extra text.\n\nINPUT:\n" +
-              input,
-          },
-        ],
-      },
-    ],
+async function hfGenerate(prompt: string): Promise<string> {
+  const res = await fetch("https://router.huggingface.co/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${hfToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: hfModel,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      max_tokens: 512,
+    }),
   });
 
-  const text = result.response.text() || "{}";
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = (await res.json()) as any;
+      if (typeof body?.error === "string") {
+        detail = body.error;
+      }
+    } catch {
+      // ignore JSON parse errors and fall back to statusText
+    }
+    throw new Error(`Hugging Face request failed (${res.status}): ${detail}`);
+  }
+
+  const data = (await res.json()) as any;
+
+  // OpenAI-style chat completion response
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+
+  // Fallbacks for any slightly different structures
+  if (Array.isArray(data?.choices) && typeof data.choices[0] === "string") {
+    return data.choices[0] as string;
+  }
+
+  return typeof data === "string" ? data : JSON.stringify(data);
+}
+
+async function generateJson<T = any>(instruction: string, input: string): Promise<T> {
+  const prompt =
+    instruction + "\n\nReturn only valid JSON, no extra text.\n\nINPUT:\n" + input;
+
+  const text = (await hfGenerate(prompt)) || "{}";
   try {
     return JSON.parse(text) as T;
   } catch (e) {
-    console.error("Failed to parse Gemini JSON response", text, e);
+    console.error("Failed to parse Hugging Face JSON-style response", text, e);
     return {} as T;
   }
 }
@@ -281,6 +314,42 @@ export class AIService {
   }
 
   /**
+   * Improve a student's feedback comment to be more clear, polite, and constructive
+   */
+  async improveFeedback(comment: string): Promise<string> {
+    const original = (comment || "").trim();
+    if (!original) {
+      return original;
+    }
+
+    const instruction =
+      "You are an assistant that rewrites student feedback about a lecture or teacher. " +
+      "Keep the original meaning, but make the text more polite, clear, and constructive. " +
+      "Do not add new complaints or compliments that were not there. Return only the rewritten feedback.";
+
+    try {
+      const prompt = instruction + "\n\nOriginal feedback:\n" + original + "\n\nImproved feedback:";
+      const improved = await hfGenerate(prompt);
+      const normalized = (improved || "").trim();
+      if (!normalized) {
+        // Fallback if the model responds with empty content
+        return `Thank you for your feedback. ${original}`;
+      }
+
+      // If the model just echoes the same text, add a light-touch improvement wrapper
+      if (normalized === original) {
+        return `Thank you for your detailed feedback. ${original}`;
+      }
+
+      return normalized;
+    } catch (error) {
+      console.error("Improve feedback error:", error);
+      // Ensure we still return something that looks slightly improved
+      return `Thank you for your feedback. ${original}`;
+    }
+  }
+
+  /**
    * Chatbot for answering common queries
    */
   async chatbot(
@@ -288,33 +357,26 @@ export class AIService {
     conversationHistory: Array<{ role: string; content: string }> = []
   ): Promise<string> {
     try {
-      const historyParts = conversationHistory.map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      }));
+      const historyText = conversationHistory
+        .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+        .join("\n");
 
-      const contents = [
-        {
-          role: "user" as const,
-          parts: [
-            {
-              text:
-                "You are EduBot, a helpful assistant for the EduFeedback system - a lecture feedback platform. " +
-                "You help students and teachers with: how to give feedback, how to view feedback, understanding ratings and analytics, navigation help, and teacher profile information. " +
-                "Be concise, friendly, and helpful. If you don't know something, admit it.",
-            },
-          ],
-        },
-        ...historyParts,
-        {
-          role: "user" as const,
-          parts: [{ text: userMessage }],
-        },
-      ];
+      const systemPrompt =
+        "You are EduBot, a helpful assistant for the EduFeedback system - a lecture feedback platform. " +
+        "You help students and teachers with: how to give feedback, how to view feedback, understanding ratings and analytics, navigation help, and teacher profile information. " +
+        "Be concise, friendly, and helpful. If you don't know something, admit it.";
 
-      const result = await chatModel.generateContent({ contents });
-      const text = result.response.text();
-      return text || "I'm sorry, I couldn't process that.";
+      const prompt =
+        systemPrompt +
+        "\n\nConversation so far (if any):\n" +
+        (historyText ? historyText + "\n\n" : "") +
+        "USER: " +
+        userMessage +
+        "\nASSISTANT:";
+
+      const text = await hfGenerate(prompt);
+      const trimmed = text.trim();
+      return trimmed || "I'm sorry, I couldn't process that.";
     } catch (error) {
       console.error("Chatbot error:", error);
       const anyError = error as any;

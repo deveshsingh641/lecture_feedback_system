@@ -12,11 +12,15 @@ import Home from "@/pages/Home";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import StudentDashboard from "@/pages/StudentDashboard";
+import StudentTeachers from "@/pages/StudentTeachers";
+import MyFeedback from "@/pages/MyFeedback";
+import Favorites from "@/pages/Favorites";
 import TeacherDashboard from "@/pages/TeacherDashboard";
 import TeacherProfile from "@/pages/TeacherProfile";
 import EditTeacherProfile from "@/pages/EditTeacherProfile";
 import Analytics from "@/pages/Analytics";
 import AdminPanel from "@/pages/AdminPanel";
+import AdminTeachers from "@/pages/AdminTeachers";
 import QrFeedbackPage from "@/pages/QrFeedbackPage";
 
 function ProtectedRoute({ 
@@ -82,7 +86,19 @@ function Router() {
       
       <Route path="/student/teachers">
         <ProtectedRoute allowedRoles={["student"]}>
-          <StudentDashboard />
+          <StudentTeachers />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/student/feedback">
+        <ProtectedRoute allowedRoles={["student"]}>
+          <MyFeedback />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/favorites">
+        <ProtectedRoute allowedRoles={["student"]}>
+          <Favorites />
         </ProtectedRoute>
       </Route>
       
@@ -122,7 +138,7 @@ function Router() {
       
       <Route path="/admin/teachers">
         <ProtectedRoute allowedRoles={["admin"]}>
-          <AdminPanel />
+          <AdminTeachers />
         </ProtectedRoute>
       </Route>
       

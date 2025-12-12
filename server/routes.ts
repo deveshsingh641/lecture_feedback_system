@@ -1,13 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { loginSchema, signupSchema, insertTeacherSchema, insertFeedbackSchema, updateTeacherSchema, insertReplySchema, feedback } from "@shared/schema";
+import { loginSchema, signupSchema, insertTeacherSchema, insertFeedbackSchema, updateTeacherSchema, insertReplySchema, feedback, doubts, teachers } from "@shared/schema";
 import { aiService } from "./ai-service";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, and, lte, desc } from "drizzle-orm";
 import multer from "multer";
 import OpenAI from "openai";
 
@@ -78,6 +78,64 @@ export async function registerRoutes(
         username: data.email.split("@")[0],
       });
 
+      const token = jwt.sign(
+        { id: user.id, email: user.email, role: user.role, name: user.name },
+        JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          department: user.department,
+        },
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Signup error:", error);
+      res.status(500).json({ error: "Failed to create account" });
+    }
+  });
+
+  // Favorites Routes
+  app.get("/api/favorites/my", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const items = await storage.getFavoritesByStudent(req.user!.id);
+      res.json(items.map((f) => f.teacherId));
+    } catch (error) {
+      console.error("Get favorites error:", error);
+      res.status(500).json({ error: "Failed to get favorites" });
+    }
+  });
+
+  app.post("/api/favorites/:teacherId", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const { teacherId } = req.params;
+      const favorite = await storage.addFavorite(req.user!.id, teacherId);
+      res.status(201).json(favorite);
+    } catch (error) {
+      console.error("Add favorite error:", error);
+      res.status(500).json({ error: "Failed to add favorite" });
+    }
+  });
+
+  app.delete("/api/favorites/:teacherId", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const { teacherId } = req.params;
+      await storage.removeFavorite(req.user!.id, teacherId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Remove favorite error:", error);
+      res.status(500).json({ error: "Failed to remove favorite" });
+    }
+  });
+
   // Doubt Wall Routes
   app.get("/api/doubts/my", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
     try {
@@ -117,31 +175,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Answer doubt error:", error);
       res.status(500).json({ error: "Failed to answer doubt" });
-    }
-  });
-
-      const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role, name: user.name },
-        JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-      res.json({
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          department: user.department,
-        },
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0].message });
-      }
-      console.error("Signup error:", error);
-      res.status(500).json({ error: "Failed to create account" });
     }
   });
 
@@ -211,6 +244,16 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Get teachers error:", error);
       res.status(500).json({ error: "Failed to get teachers" });
+    }
+  });
+
+  app.get("/api/teachers/feedback", async (_req, res) => {
+    try {
+      const teachersList = await storage.getTeachers();
+      res.json(teachersList);
+    } catch (error) {
+      console.error("Get teachers (feedback view) error:", error);
+      res.status(500).json({ error: "Failed to get teachers for feedback view" });
     }
   });
 
@@ -301,6 +344,33 @@ export async function registerRoutes(
     }
   });
 
+  // All feedback submitted by current student (with teacher names)
+  app.get("/api/feedback/my", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const [feedbackList, teachersList] = await Promise.all([
+        storage.getFeedbackByStudent(req.user!.id),
+        storage.getTeachers(),
+      ]);
+
+      const teacherMap = new Map(teachersList.map((t) => [t.id, t]));
+
+      const result = feedbackList.map((fb) => {
+        const teacher = teacherMap.get(fb.teacherId);
+        return {
+          ...fb,
+          teacherName: teacher?.name || "Unknown Teacher",
+          department: teacher?.department || null,
+          subject: teacher?.subject || null,
+        };
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Get my feedback error:", error);
+      res.status(500).json({ error: "Failed to get your feedback" });
+    }
+  });
+
   // Feedback reminder status for current student
   app.get("/api/feedback/reminder-status", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
     try {
@@ -338,6 +408,11 @@ export async function registerRoutes(
     res.json({ enabled });
   });
 
+  interface UploadedAudioFile {
+    buffer: Buffer;
+    mimetype?: string;
+  }
+
   app.post(
     "/api/feedback/transcribe",
     authenticateToken,
@@ -353,12 +428,12 @@ export async function registerRoutes(
           apiKey: process.env.OPENAI_API_KEY,
         });
 
-        const file = (req as any).file as Express.Multer.File | undefined;
+        const file = (req as any).file as UploadedAudioFile | undefined;
         if (!file) {
           return res.status(400).json({ error: "Audio file is required" });
         }
 
-        const audioBlob = new Blob([file.buffer], {
+        const audioBlob = new Blob([file.buffer as any], {
           type: file.mimetype || "audio/webm",
         });
 
@@ -647,6 +722,113 @@ export async function registerRoutes(
     }
   });
 
+  // Admin: Doubt SLA monitoring - overdue doubts
+  app.get("/api/admin/doubts/overdue", authenticateToken, requireRole("admin"), async (req: AuthRequest, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 5;
+      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const overdue = await db
+        .select({
+          id: doubts.id,
+          teacherId: doubts.teacherId,
+          studentName: doubts.studentName,
+          question: doubts.question,
+          status: doubts.status,
+          createdAt: doubts.createdAt,
+          answeredAt: doubts.answeredAt,
+          teacherName: teachers.name,
+          department: teachers.department,
+        })
+        .from(doubts)
+        .leftJoin(teachers, eq(doubts.teacherId, teachers.id))
+        .where(and(eq(doubts.status, "open"), lte(doubts.createdAt, cutoff)))
+        .orderBy(desc(doubts.createdAt));
+
+      res.json(overdue);
+    } catch (error) {
+      console.error("Get overdue doubts error:", error);
+      res.status(500).json({ error: "Failed to get overdue doubts" });
+    }
+  });
+
+  // Admin: Feedback moderation queue (flagged for abusive language)
+  app.get("/api/admin/feedback/flagged", authenticateToken, requireRole("admin"), async (_req: AuthRequest, res) => {
+    try {
+      const all = await db
+        .select({
+          id: feedback.id,
+          teacherId: feedback.teacherId,
+          studentId: feedback.studentId,
+          studentName: feedback.studentName,
+          rating: feedback.rating,
+          comment: feedback.comment,
+          subject: feedback.subject,
+          createdAt: feedback.createdAt,
+          teacherName: teachers.name,
+          department: teachers.department,
+        })
+        .from(feedback)
+        .leftJoin(teachers, eq(feedback.teacherId, teachers.id))
+        .orderBy(desc(feedback.createdAt));
+
+      const flagged = all.filter((fb) => {
+        if (!fb.comment) return false;
+        const lower = fb.comment.toLowerCase();
+        return ABUSIVE_WORDS.some((w) => lower.includes(w));
+      });
+
+      res.json(flagged);
+    } catch (error) {
+      console.error("Get flagged feedback error:", error);
+      res.status(500).json({ error: "Failed to get flagged feedback" });
+    }
+  });
+
+  // Admin: delete feedback (for moderation)
+  app.delete("/api/admin/feedback/:id", authenticateToken, requireRole("admin"), async (req: AuthRequest, res) => {
+    try {
+      const id = req.params.id;
+      const existing = await db
+        .select()
+        .from(feedback)
+        .where(eq(feedback.id, id))
+        .limit(1);
+
+      if (!existing[0]) {
+        return res.status(404).json({ error: "Feedback not found" });
+      }
+
+      const fb = existing[0];
+      await db.delete(feedback).where(eq(feedback.id, id));
+
+      // Recalculate teacher aggregates after deletion
+      const remaining = await db
+        .select()
+        .from(feedback)
+        .where(eq(feedback.teacherId, fb.teacherId));
+
+      if (remaining.length > 0) {
+        const avgRating =
+          remaining.reduce((sum, f) => sum + f.rating, 0) / remaining.length;
+        await db
+          .update(teachers)
+          .set({ averageRating: avgRating, totalFeedback: remaining.length })
+          .where(eq(teachers.id, fb.teacherId));
+      } else {
+        await db
+          .update(teachers)
+          .set({ averageRating: 0, totalFeedback: 0 })
+          .where(eq(teachers.id, fb.teacherId));
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete feedback (admin) error:", error);
+      res.status(500).json({ error: "Failed to delete feedback" });
+    }
+  });
+
   // Activity Feed Route
   app.get("/api/activity/recent", async (req, res) => {
     try {
@@ -777,6 +959,23 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Recommend teachers error:", error);
       res.status(500).json({ error: error.message || "Failed to get recommendations" });
+    }
+  });
+
+  // AI: Improve student feedback text
+  app.post("/api/ai/improve-feedback", authenticateToken, requireRole("student"), async (req: AuthRequest, res) => {
+    try {
+      const { comment } = req.body as { comment?: string };
+
+      if (!comment || typeof comment !== "string" || !comment.trim()) {
+        return res.status(400).json({ error: "Comment is required" });
+      }
+
+      const improvedComment = await aiService.improveFeedback(comment);
+      res.json({ improvedComment });
+    } catch (error: any) {
+      console.error("Improve feedback error:", error);
+      res.status(500).json({ error: error.message || "Failed to improve feedback" });
     }
   });
 
