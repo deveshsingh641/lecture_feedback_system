@@ -2,29 +2,31 @@ const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_KEY;
 const hfModel =
   process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "mistralai/Mistral-7B-Instruct-v0.2";
 
-if (!hfToken) {
-  console.error(
-    "Hugging Face API token is not configured. Please set HF_API_TOKEN or HUGGINGFACE_API_KEY in your .env file.",
-  );
-  throw new Error("Hugging Face API token is not configured");
+function getInferenceModelPath(model: string) {
+  return encodeURIComponent(model).replace(/%2F/g, "/");
 }
 
 async function hfGenerate(prompt: string): Promise<string> {
-  const res = await fetch("https://router.huggingface.co/v1/chat/completions", {
+  if (!hfToken) {
+    throw new Error("Hugging Face API token is not configured (set HF_API_TOKEN)");
+  }
+
+  const modelPath = getInferenceModelPath(hfModel);
+  const res = await fetch(`https://api-inference.huggingface.co/models/${modelPath}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${hfToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: hfModel,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      max_tokens: 512,
+      inputs: prompt,
+      parameters: {
+        max_new_tokens: 512,
+        return_full_text: false,
+      },
+      options: {
+        wait_for_model: true,
+      },
     }),
   });
 
@@ -43,13 +45,22 @@ async function hfGenerate(prompt: string): Promise<string> {
 
   const data = (await res.json()) as any;
 
-  // OpenAI-style chat completion response
+  if (Array.isArray(data)) {
+    const generated = data?.[0]?.generated_text;
+    if (typeof generated === "string") {
+      return generated;
+    }
+  }
+
+  if (typeof data?.generated_text === "string") {
+    return data.generated_text;
+  }
+
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content === "string") {
     return content;
   }
 
-  // Fallbacks for any slightly different structures
   if (Array.isArray(data?.choices) && typeof data.choices[0] === "string") {
     return data.choices[0] as string;
   }

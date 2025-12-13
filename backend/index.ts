@@ -7,7 +7,6 @@ if (!process.env.DATABASE_URL) {
   dotenv.config({ path: path.resolve(process.cwd(), "..", ".env") });
 }
 
-// Debug print
 console.log("Loaded DATABASE_URL =", process.env.DATABASE_URL ? "set" : "missing");
 
 import express, { type Request, Response, NextFunction } from "express";
