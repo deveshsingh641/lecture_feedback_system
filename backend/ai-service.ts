@@ -1,17 +1,18 @@
 const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_KEY;
 const hfModel =
   process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "mistralai/Mistral-7B-Instruct-v0.2";
+const hfFallbackModel = process.env.HF_FALLBACK_MODEL || "google/flan-t5-large";
 
 function getInferenceModelPath(model: string) {
   return encodeURIComponent(model).replace(/%2F/g, "/");
 }
 
-async function hfGenerate(prompt: string): Promise<string> {
+async function hfRequest(model: string, prompt: string): Promise<string> {
   if (!hfToken) {
     throw new Error("Hugging Face API token is not configured (set HF_API_TOKEN)");
   }
 
-  const modelPath = getInferenceModelPath(hfModel);
+  const modelPath = getInferenceModelPath(model);
   const res = await fetch(`https://api-inference.huggingface.co/models/${modelPath}`, {
     method: "POST",
     headers: {
@@ -36,11 +37,15 @@ async function hfGenerate(prompt: string): Promise<string> {
       const body = (await res.json()) as any;
       if (typeof body?.error === "string") {
         detail = body.error;
+      } else if (typeof body?.message === "string") {
+        detail = body.message;
       }
     } catch {
       // ignore JSON parse errors and fall back to statusText
     }
-    throw new Error(`Hugging Face request failed (${res.status}): ${detail}`);
+    const err: any = new Error(`Hugging Face request failed (${res.status}): ${detail}`);
+    err.status = res.status;
+    throw err;
   }
 
   const data = (await res.json()) as any;
@@ -66,6 +71,21 @@ async function hfGenerate(prompt: string): Promise<string> {
   }
 
   return typeof data === "string" ? data : JSON.stringify(data);
+}
+
+async function hfGenerate(prompt: string): Promise<string> {
+  try {
+    return await hfRequest(hfModel, prompt);
+  } catch (error: any) {
+    const status = error?.status;
+    if (status === 403 || status === 404 || status === 503) {
+      console.warn(
+        `HF model '${hfModel}' failed (${status}). Falling back to '${hfFallbackModel}'.`,
+      );
+      return await hfRequest(hfFallbackModel, prompt);
+    }
+    throw error;
+  }
 }
 
 async function generateJson<T = any>(instruction: string, input: string): Promise<T> {
