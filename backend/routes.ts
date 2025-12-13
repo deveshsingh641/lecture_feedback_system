@@ -1009,7 +1009,12 @@ export async function registerRoutes(
       res.json({ response });
     } catch (error: any) {
       console.error("Chatbot error:", error);
-      res.status(500).json({ error: error.message || "Failed to process chat message" });
+      const status = typeof error?.status === "number" ? error.status : 500;
+      const message =
+        typeof error?.userMessage === "string"
+          ? error.userMessage
+          : error?.message || "Failed to process chat message";
+      res.status(status).json({ error: message });
     }
   });
 

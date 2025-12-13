@@ -1,7 +1,11 @@
 const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_KEY;
 const hfModel =
   process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "mistralai/Mistral-7B-Instruct-v0.2";
-const hfFallbackModel = process.env.HF_FALLBACK_MODEL || "google/flan-t5-large";
+const hfFallbackModelsEnv = process.env.HF_FALLBACK_MODELS;
+const hfFallbackModel = process.env.HF_FALLBACK_MODEL || "google/flan-t5-base";
+const hfFallbackModels = (hfFallbackModelsEnv
+  ? hfFallbackModelsEnv.split(",").map((m) => m.trim()).filter(Boolean)
+  : [hfFallbackModel, "distilgpt2"]);
 
 function getInferenceModelPath(model: string) {
   return encodeURIComponent(model).replace(/%2F/g, "/");
@@ -74,18 +78,26 @@ async function hfRequest(model: string, prompt: string): Promise<string> {
 }
 
 async function hfGenerate(prompt: string): Promise<string> {
-  try {
-    return await hfRequest(hfModel, prompt);
-  } catch (error: any) {
-    const status = error?.status;
-    if (status === 403 || status === 404 || status === 410 || status === 503) {
-      console.warn(
-        `HF model '${hfModel}' failed (${status}). Falling back to '${hfFallbackModel}'.`,
-      );
-      return await hfRequest(hfFallbackModel, prompt);
+  const candidates = [hfModel, ...hfFallbackModels].filter(Boolean);
+  let lastError: any;
+
+  for (const model of candidates) {
+    try {
+      if (model !== hfModel) {
+        console.warn(`HF model '${hfModel}' failed. Falling back to '${model}'.`);
+      }
+      return await hfRequest(model, prompt);
+    } catch (error: any) {
+      lastError = error;
+      const status = error?.status;
+      if (status === 403 || status === 404 || status === 410 || status === 503) {
+        continue;
+      }
+      throw error;
     }
-    throw error;
   }
+
+  throw lastError;
 }
 
 async function generateJson<T = any>(instruction: string, input: string): Promise<T> {
@@ -412,10 +424,21 @@ export class AIService {
       console.error("Chatbot error:", error);
       const anyError = error as any;
       if (anyError?.code === "insufficient_quota" || anyError?.status === 429) {
-        return "AI service is temporarily unavailable due to quota limits. Please contact the admin.";
+        anyError.userMessage =
+          "AI service is temporarily unavailable due to quota limits. Please contact the admin.";
+        anyError.status = anyError.status || 429;
+        throw anyError;
       }
 
-      return "I'm experiencing technical difficulties. Please try again later.";
+      if (anyError?.status === 403 || anyError?.status === 404 || anyError?.status === 410) {
+        anyError.userMessage =
+          "AI service is not configured correctly or the configured model is unavailable. Please contact the admin.";
+        throw anyError;
+      }
+
+      anyError.userMessage =
+        "I'm experiencing technical difficulties. Please try again later.";
+      throw anyError;
     }
   }
 }
