@@ -981,41 +981,9 @@ export async function registerRoutes(
 
   // AI: Chatbot
   app.post("/api/ai/chat", authenticateToken, async (req: AuthRequest, res) => {
-    try {
-      const { message } = req.body;
-      
-      if (!message || typeof message !== "string") {
-        return res.status(400).json({ error: "Message required" });
-      }
-
-      const userId = req.user!.id;
-
-      // Get recent chat history
-      const history = await storage.getChatHistory(userId, 5);
-      const conversationHistory = history.reverse().flatMap((h) => [
-        { role: "user", content: h.message },
-        { role: "assistant", content: h.response },
-      ]);
-
-      const response = await aiService.chatbot(message, conversationHistory);
-
-      // Save to history
-      await storage.saveChatMessage({
-        userId,
-        message,
-        response,
-      });
-
-      res.json({ response });
-    } catch (error: any) {
-      console.error("Chatbot error:", error);
-      const status = typeof error?.status === "number" ? error.status : 500;
-      const message =
-        typeof error?.userMessage === "string"
-          ? error.userMessage
-          : error?.message || "Failed to process chat message";
-      res.status(status).json({ error: message });
-    }
+    return res.status(410).json({
+      error: "Chatbot is temporarily disabled.",
+    });
   });
 
   // AI: Reply templates for teachers

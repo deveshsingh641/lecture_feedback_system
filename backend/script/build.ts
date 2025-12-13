@@ -36,14 +36,20 @@ const allowlist = [
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
-  console.log("building frontend...");
+  const skipFrontendBuild = process.env.SKIP_FRONTEND_BUILD === "true";
+
+  if (!skipFrontendBuild) {
+    console.log("building frontend...");
+  }
   const frontendRoot = path.resolve(process.cwd(), "..", "frontend");
-  execSync("npm run build", {
-    cwd: frontendRoot,
-    stdio: "inherit",
-    env: process.env,
-    shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
-  });
+  if (!skipFrontendBuild) {
+    execSync("npm run build", {
+      cwd: frontendRoot,
+      stdio: "inherit",
+      env: process.env,
+      shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+    });
+  }
 
   const frontendDist = path.resolve(frontendRoot, "dist");
   const publicOut = path.resolve(process.cwd(), "dist", "public");

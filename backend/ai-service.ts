@@ -1,11 +1,13 @@
 const hfToken = process.env.HF_API_TOKEN || process.env.HUGGINGFACE_API_KEY;
 const hfModel =
-  process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "mistralai/Mistral-7B-Instruct-v0.2";
+  process.env.HF_MODEL || process.env.HUGGINGFACE_MODEL || "google/flan-t5-base";
+const hfInferenceBaseUrl =
+  process.env.HF_INFERENCE_BASE_URL || "https://router.huggingface.co/hf-inference/models";
 const hfFallbackModelsEnv = process.env.HF_FALLBACK_MODELS;
-const hfFallbackModel = process.env.HF_FALLBACK_MODEL || "google/flan-t5-base";
+const hfFallbackModel = process.env.HF_FALLBACK_MODEL || "distilgpt2";
 const hfFallbackModels = (hfFallbackModelsEnv
   ? hfFallbackModelsEnv.split(",").map((m) => m.trim()).filter(Boolean)
-  : [hfFallbackModel, "distilgpt2"]);
+  : [hfFallbackModel, "gpt2"]);
 
 function getInferenceModelPath(model: string) {
   return encodeURIComponent(model).replace(/%2F/g, "/");
@@ -17,7 +19,7 @@ async function hfRequest(model: string, prompt: string): Promise<string> {
   }
 
   const modelPath = getInferenceModelPath(model);
-  const res = await fetch(`https://api-inference.huggingface.co/models/${modelPath}`, {
+  const res = await fetch(`${hfInferenceBaseUrl}/${modelPath}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${hfToken}`,
@@ -47,7 +49,9 @@ async function hfRequest(model: string, prompt: string): Promise<string> {
     } catch {
       // ignore JSON parse errors and fall back to statusText
     }
-    const err: any = new Error(`Hugging Face request failed (${res.status}): ${detail}`);
+    const err: any = new Error(
+      `Hugging Face request failed (${res.status}) [model=${model}, base=${hfInferenceBaseUrl}]: ${detail}`,
+    );
     err.status = res.status;
     throw err;
   }

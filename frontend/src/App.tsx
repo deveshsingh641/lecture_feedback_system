@@ -6,7 +6,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { Navbar } from "@/components/Navbar";
-import { AIChatbot } from "@/components/AIChatbot";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
@@ -158,7 +157,6 @@ function App() {
               <Router />
             </div>
             <Toaster />
-            <AIChatbot />
           </TooltipProvider>
         </AuthProvider>
       </ThemeProvider>
