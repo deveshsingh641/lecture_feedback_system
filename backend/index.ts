@@ -8,7 +8,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 // Debug print
-console.log("Loaded DATABASE_URL =", process.env.DATABASE_URL);
+console.log("Loaded DATABASE_URL =", process.env.DATABASE_URL ? "set" : "missing");
 
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
@@ -88,12 +88,17 @@ app.use((req, res, next) => {
 
 (async () => {
   try {
-    // Seed database on startup
-    try {
-      const { seed } = await import("./seed");
-      await seed();
-    } catch (seedError) {
-      console.warn("Database seeding failed or skipped:", seedError);
+    // Seed database only when explicitly enabled (avoid slowing down cold starts)
+    const shouldSeed =
+      process.env.NODE_ENV !== "production" ||
+      process.env.SEED_ON_STARTUP === "true";
+    if (shouldSeed) {
+      try {
+        const { seed } = await import("./seed");
+        await seed();
+      } catch (seedError) {
+        console.warn("Database seeding failed or skipped:", seedError);
+      }
     }
 
     await registerRoutes(httpServer, app);
@@ -109,8 +114,16 @@ app.use((req, res, next) => {
     if (process.env.NODE_ENV === "production") {
       const publicDir = path.resolve(process.cwd(), "dist", "public");
       if (fs.existsSync(publicDir)) {
-        app.use(express.static(publicDir));
+        app.use(
+          express.static(publicDir, {
+            immutable: true,
+            maxAge: "1y",
+            index: false,
+          }),
+        );
         app.get("*", (_req, res) => {
+          // HTML should not be cached aggressively so new deploys show up immediately
+          res.setHeader("Cache-Control", "no-cache");
           res.sendFile(path.join(publicDir, "index.html"));
         });
       } else {
