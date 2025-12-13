@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx index.ts",
     "build": "tsx script/build.ts",
-    "start": "node dist/index.cjs",
+    "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "lint": "npm run check",
     "db:push": "drizzle-kit push",
@@ -31,6 +31,7 @@
     "openai": "^6.10.0",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
+    "rest-express": "file:..",
     "ws": "^8.18.0",
     "zod": "^3.25.0",
     "zod-validation-error": "^3.4.0"
@@ -46,6 +47,7 @@
     "@types/passport": "^1.0.16",
     "@types/passport-local": "^1.0.38",
     "@types/ws": "^8.5.13",
+    "cross-env": "^7.0.3",
     "drizzle-kit": "^0.18.1",
     "esbuild": "^0.25.0",
     "tsx": "^4.20.5",

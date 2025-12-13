@@ -43,9 +43,11 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-app.get("/", (_req, res) => {
-  res.status(200).send("Backend is running. Frontend is served separately.");
-});
+if (process.env.NODE_ENV !== "production") {
+  app.get("/", (_req, res) => {
+    res.status(200).send("Backend is running. Frontend is served separately.");
+  });
+}
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
