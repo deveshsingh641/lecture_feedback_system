@@ -78,7 +78,7 @@ async function hfGenerate(prompt: string): Promise<string> {
     return await hfRequest(hfModel, prompt);
   } catch (error: any) {
     const status = error?.status;
-    if (status === 403 || status === 404 || status === 503) {
+    if (status === 403 || status === 404 || status === 410 || status === 503) {
       console.warn(
         `HF model '${hfModel}' failed (${status}). Falling back to '${hfFallbackModel}'.`,
       );
