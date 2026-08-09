@@ -1,6 +1,14 @@
 import dotenv from "dotenv";
 import path from "path";
 import mongoose from "mongoose";
+import dns from "dns";
+
+// Ensure Node's DNS resolver can resolve MongoDB Atlas SRV records on Windows
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+} catch {
+  // Ignore if custom DNS servers cannot be set
+}
 
 dotenv.config();
 if (!process.env.MONGODB_URI) {

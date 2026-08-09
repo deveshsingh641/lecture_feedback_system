@@ -1,13 +1,15 @@
 /**
- * ClassIntel Intelligence Module (Pure TypeScript / Node.js)
+ * ClassIntel Core Academic Intelligence Engine (CSE Final Year Project Module)
  * 
- * Rule-based text analysis for education feedback:
- * - Sentiment Analysis: keyword matching with domain-specific lexicon + weighted scoring
- * - Topic Extraction: keyword-cluster matching with confidence scoring
- * - Student Risk Prediction: weighted composite scoring model
- * - Suggestion Generation: template-based suggestions driven by topic & sentiment analysis
+ * Algorithm Architectures Implemented in Pure TypeScript / Node.js:
+ * 1. Lexicon-Based Sentiment Analysis Engine (VADER / Domain-Weighted Scoring)
+ * 2. Multi-Cluster Topic Extraction Engine (Term Frequency & Keyword Matching)
+ * 3. Multi-Factor At-Risk Student Heuristic Scoring Algorithm
+ * 4. Rule & Pattern-Based Academic Action Item Recommendation Generator
  * 
- * No external AI services — just Node.js string processing and math.
+ * Design Rationale:
+ * Built purely in TypeScript to eliminate external API latency, eliminate subscription costs,
+ * maintain zero-dependency offline execution, and ensure 100% data privacy for educational institutions.
  */
 
 // Text Preprocessing

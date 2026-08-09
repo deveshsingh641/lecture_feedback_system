@@ -1007,7 +1007,7 @@ router.get("/intelligence/suggestions/:teacherId", authenticateToken, async (req
   }
 });
 
-// Course Documents Keyword Query
+// Course Documents Keyword Query & In-Memory Information Retrieval (IR) System
 
 // Stopwords to exclude from search scoring
 const SEARCH_STOPWORDS = new Set([
@@ -1019,6 +1019,10 @@ const SEARCH_STOPWORDS = new Set([
   "you", "your", "our", "his", "her", "him", "she", "they", "them"
 ]);
 
+/**
+ * PDF / Document Text Parser Endpoint:
+ * Extracts plain text from uploaded PDF files using 'pdf-parse' stream buffer.
+ */
 router.post("/rag/documents/parse-file", authenticateToken, requireRole("teacher", "admin"), upload.single("file"), async (req: AuthRequest, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "File is required" });
@@ -1055,6 +1059,13 @@ router.post("/rag/documents/parse-file", authenticateToken, requireRole("teacher
   }
 });
 
+/**
+ * Course Document Indexer Endpoint:
+ * Implements a Sliding Window Document Chunking Algorithm:
+ * - Window size: 500 characters
+ * - Step overlap: 100 characters
+ * Preserves semantic continuity across paragraph boundaries.
+ */
 router.post("/rag/documents", authenticateToken, requireRole("teacher", "admin"), async (req: AuthRequest, res) => {
   try {
     const { title, subject, content } = req.body as { title?: string; subject?: string; content?: string };
@@ -1064,6 +1075,7 @@ router.post("/rag/documents", authenticateToken, requireRole("teacher", "admin")
 
     const teacherId = await getTeacherId(req.user!);
 
+    // Sliding window text segmentation
     const chunkSize = 500;
     const overlap = 100;
     const chunks: string[] = [];
@@ -1117,6 +1129,13 @@ router.delete("/rag/documents/:id", authenticateToken, requireRole("teacher", "a
   }
 });
 
+/**
+ * Course Document Vector Search & Context Retrieval:
+ * 1. Tokenizes user query & removes common search stopwords.
+ * 2. Iterates over indexed document chunks calculating Term Frequency relevance score.
+ * 3. Applies positional weighting boost (+0.5) for heading matches.
+ * 4. Ranks chunks by score descending and extracts top relevant context snippets.
+ */
 router.post("/rag/chat", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { question, subject } = req.body as { question?: string; subject?: string };

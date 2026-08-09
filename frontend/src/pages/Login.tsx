@@ -74,11 +74,11 @@ export default function Login() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Email or Username</Label>
               <Input
                 id="email"
-                type="email"
-                placeholder="you@example.com"
+                type="text"
+                placeholder="admin@edu.com or admin"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 data-testid="input-email"
@@ -120,9 +120,10 @@ export default function Login() {
           </div>
 
           <div className="mt-6 p-4 glass rounded-lg">
-            <p className="text-xs text-muted-foreground text-center mb-2">Demo Admin Credentials</p>
+            <p className="text-xs text-muted-foreground text-center mb-2 font-semibold">Demo Credentials</p>
             <div className="space-y-1 text-xs text-center">
               <p><span className="font-medium">Admin:</span> admin@edu.com / admin123</p>
+              <p><span className="font-medium">Student:</span> alex@student.edu / student123</p>
             </div>
           </div>
         </CardContent>
