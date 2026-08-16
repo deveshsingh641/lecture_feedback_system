@@ -14,30 +14,25 @@ import announcementsRouter from "./announcements";
 import achievementsRouter from "./achievements";
 import assignmentsRouter from "./assignments";
 
+import mongoose from "mongoose";
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Global Health Check
-  app.get("/api/health", async (_req, res) => {
-    try {
-      await storage.getTeachers();
-      res.json({
-        status: "ok",
-        timestamp: new Date().toISOString(),
-        mongodb: "connected",
-        uptime: process.uptime(),
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("Health check failed:", message);
-      res.status(503).json({
-        status: "error",
-        timestamp: new Date().toISOString(),
-        mongodb: "disconnected",
-        error: message,
-      });
-    }
+  // Global Health Check - non-blocking direct readyState check
+  app.get("/api/health", (_req, res) => {
+    const readyState = mongoose.connection.readyState;
+    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+    const isConnected = readyState === 1;
+    const isConnecting = readyState === 2;
+
+    res.status(isConnected ? 200 : isConnecting ? 200 : 503).json({
+      status: isConnected ? "ok" : isConnecting ? "connecting" : "error",
+      timestamp: new Date().toISOString(),
+      mongodb: isConnected ? "connected" : isConnecting ? "connecting" : "disconnected",
+      uptime: process.uptime(),
+    });
   });
 
   // Mount all modular domain routers

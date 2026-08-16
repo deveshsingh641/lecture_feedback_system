@@ -1,3 +1,12 @@
+import dns from "dns";
+
+// Ensure Node's DNS resolver can resolve MongoDB Atlas SRV records in any environment
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+} catch {
+  // Ignore if custom DNS servers cannot be set
+}
+
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -28,27 +37,23 @@ function sleep(ms: number) {
 }
 
 async function connectDbWithRetry() {
-  const isProduction = process.env.NODE_ENV === "production";
   let attempt = 0;
-  let delayMs = 1000;
+  let delayMs = 2000;
 
   while (true) {
     try {
       await connectDb();
+      log("Successfully connected to MongoDB database.", "database");
       return;
     } catch (error) {
       attempt += 1;
       const message = error instanceof Error ? error.message : String(error);
 
-      console.error("[server] Database connection failed:", message);
-      if (isProduction) {
-        throw error;
-      }
-
-      const waitForMs = Math.min(delayMs, 30000);
-      console.log(`[server] Retrying connection in ${Math.ceil(waitForMs / 1000)}s...`);
+      console.error(`[database] Connection attempt ${attempt} failed: ${message}`);
+      const waitForMs = Math.min(delayMs, 15000);
+      console.log(`[database] Retrying connection in ${Math.ceil(waitForMs / 1000)}s...`);
       await sleep(waitForMs);
-      delayMs = delayMs * 2;
+      delayMs = Math.min(delayMs * 1.5, 15000);
     }
   }
 }
@@ -150,37 +155,7 @@ app.use((req, res, next) => {
 
 (async () => {
   try {
-    await connectDbWithRetry();
-
-    // Attempt database seeding on startup only if database hasn't been seeded yet (or forced)
-    try {
-      let shouldSeed = false;
-      if (process.env.FORCE_SEED === "true") {
-        shouldSeed = true;
-      } else {
-        try {
-          const adminUser = await storage.getUserByEmail("admin@edu.com");
-          if (!adminUser) {
-            shouldSeed = true;
-          }
-        } catch (dbErr) {
-          // If we fail to query the db, we seed it as a safe fallback
-          shouldSeed = true;
-        }
-      }
-
-      if (shouldSeed) {
-        log("Database not seeded. Running database seeding...", "server");
-        const { seed } = await import("./seed");
-        await seed();
-      } else {
-        log("Database already seeded. Skipping startup seeding.", "server");
-      }
-    } catch (seedError) {
-      console.warn("[server] Database seeding check/operation failed:", seedError);
-    }
-
-
+    // 1. Register routes & middleware immediately
     await registerRoutes(httpServer, app);
 
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -229,11 +204,45 @@ app.use((req, res, next) => {
       throw err;
     });
 
+    // 2. Start listening immediately so Render health checks never time out
     await new Promise<void>((resolve) => {
       httpServer.listen(desiredPort, "0.0.0.0", () => resolve());
     });
 
     log(`serving on port ${desiredPort}`);
+
+    // 3. Connect to database in the background without blocking HTTP server
+    connectDbWithRetry()
+      .then(async () => {
+        try {
+          let shouldSeed = false;
+          if (process.env.FORCE_SEED === "true") {
+            shouldSeed = true;
+          } else {
+            try {
+              const adminUser = await storage.getUserByEmail("admin@edu.com");
+              if (!adminUser) {
+                shouldSeed = true;
+              }
+            } catch (dbErr) {
+              shouldSeed = true;
+            }
+          }
+
+          if (shouldSeed) {
+            log("Database not seeded. Running database seeding...", "server");
+            const { seed } = await import("./seed");
+            await seed();
+          } else {
+            log("Database already seeded. Skipping startup seeding.", "server");
+          }
+        } catch (seedError) {
+          console.warn("[server] Database seeding check/operation failed:", seedError);
+        }
+      })
+      .catch((err) => {
+        console.error("[server] Unhandled background db connection error:", err);
+      });
 
     // Keep-alive ping mechanism for Render free tier (runs every 14 minutes)
     const renderUrl = process.env.RENDER_EXTERNAL_URL;
