@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { withApiBase } from '@/lib/queryClient';
 
 export interface HealthStatus {
-  status: 'ok' | 'error' | 'checking';
+  status: 'ok' | 'error' | 'checking' | 'waking_up';
   mongodb: 'connected' | 'disconnected' | 'checking';
   error?: string;
   timestamp?: string;
@@ -21,13 +21,13 @@ export function useMongoDBHealth(enabled = true, intervalMs = 30000) {
     mongodb: 'checking',
   });
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
+  const [isWakingUp, setIsWakingUp] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
 
-    // Render free-tier services can take 10–30s to wake up on the first request.
-    // Use a longer timeout in production builds so we don't show false "MongoDB down" alerts.
-    const timeoutMs = import.meta.env.PROD ? 25000 : 8000;
+    // Render free-tier cold start can take up to 45-50s on initial wake up.
+    const timeoutMs = import.meta.env.PROD ? 50000 : 10000;
 
     const checkHealth = async () => {
       try {
@@ -45,7 +45,7 @@ export function useMongoDBHealth(enabled = true, intervalMs = 30000) {
           if (!isJson) {
             const bodyPreview = (await response.text()).slice(0, 200);
             throw new Error(
-              `Health check returned non-JSON from ${url}. This usually means the frontend is hitting the wrong host (missing VITE_API_URL on Vercel). Response starts with: ${JSON.stringify(bodyPreview)}`,
+              `Health check returned non-JSON from ${url}. Response starts with: ${JSON.stringify(bodyPreview)}`,
             );
           }
 
@@ -58,6 +58,7 @@ export function useMongoDBHealth(enabled = true, intervalMs = 30000) {
             error: undefined,
           });
           setConsecutiveFailures(0);
+          setIsWakingUp(false);
         } else {
           const data = isJson ? await response.json().catch(() => ({})) : {};
           const fallbackText = !isJson ? (await response.text()).slice(0, 200) : undefined;
@@ -71,6 +72,7 @@ export function useMongoDBHealth(enabled = true, intervalMs = 30000) {
             timestamp: new Date().toISOString(),
           });
           setConsecutiveFailures(prev => prev + 1);
+          setIsWakingUp(false);
         }
       } catch (error) {
         const errorName =
@@ -79,13 +81,17 @@ export function useMongoDBHealth(enabled = true, intervalMs = 30000) {
             : '';
         const isTimeout = errorName === 'AbortError' || errorName === 'TimeoutError';
 
+        if (isTimeout && import.meta.env.PROD) {
+          setIsWakingUp(true);
+        }
+
         const message = isTimeout
-          ? `Timed out after ${Math.ceil(timeoutMs / 1000)}s contacting the backend. If you're using Render free tier, it may be waking up—wait ~30s and refresh.`
+          ? `Server is waking up (Render free tier cold start). Please wait ~30s...`
           : error instanceof Error
             ? error.message
             : 'Unknown error';
         setHealth({
-          status: 'error',
+          status: isTimeout ? 'waking_up' : 'error',
           mongodb: 'disconnected',
           error: message,
           timestamp: new Date().toISOString(),
@@ -106,7 +112,8 @@ export function useMongoDBHealth(enabled = true, intervalMs = 30000) {
     health,
     isConnected: health.status === 'ok' && health.mongodb === 'connected',
     isChecking: health.status === 'checking',
-    hasErrors: consecutiveFailures >= 2, // Alert after 2 consecutive failures
+    isWakingUp,
+    hasErrors: consecutiveFailures >= 2 && !isWakingUp,
     consecutiveFailures,
   };
 }
