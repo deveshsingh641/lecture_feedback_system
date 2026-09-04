@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { Navbar } from "@/components/Navbar";
 import { DatabaseStatusAlert } from "@/components/DatabaseStatusAlert";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Analytics as VercelAnalytics } from "@vercel/analytics/react";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
@@ -225,6 +226,7 @@ function App() {
               <DatabaseStatusAlert />
             </div>
             <Toaster />
+            <VercelAnalytics />
           </TooltipProvider>
         </AuthProvider>
       </ThemeProvider>
